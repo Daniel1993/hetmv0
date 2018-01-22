@@ -1,0 +1,54 @@
+CMP_APPLY       ?= 0
+DEBUG           ?= 0
+GPUEn           ?= 1
+CPUEn           ?= 1
+CPU_INV         ?= 0
+GPU_PART        ?= 0.6
+CPU_PART        ?= 0.6
+USE_STREAM      ?= 1
+P_INTERSECT     ?= 0.5
+CMP_TYPE        ?= COMPRESSED
+BENCH           ?= BANK # MEMCD
+DEFAULT_blockNum  ?=
+DEFAULT_threadNum ?=
+
+DEFINES += -DLOG_TYPE=$(LOG_TYPE) \
+	-DHETM_GPU_EN=$(GPUEn) \
+	-DHETM_CPU_EN=$(CPUEn) \
+	-DCPU_INV=$(CPU_INV) \
+	-DGPU_PART=$(GPU_PART) \
+	-DCPU_PART=$(CPU_PART) \
+	-DP_INTERSECT=$(P_INTERSECT) \
+#
+
+ifeq ($(BENCH),BANK)
+DEFINES += -DBENCH_BANK
+endif
+
+ifeq ($(BENCH),MEMCD)
+DEFINES += -DBENCH_MEMCD
+endif
+
+ifeq ($(CMP_APPLY),1)
+DEFINES += -DCMP_APPLY=1
+endif
+
+ifeq ($(CMP_TYPE),COMPRESSED)
+DEFINES += -DCMP_TYPE=1
+endif
+
+ifeq ($(CMP_TYPE),EXPLICIT)
+DEFINES += -DCMP_TYPE=2
+endif
+
+ifeq ($(CMP_TYPE),DISABLED)
+DEFINES += -DCMP_TYPE=0
+endif
+
+ifeq ($(USE_STREAM),1)
+DEFINES += -DUSE_STREAM=1
+endif
+
+ifeq ($(DEBUG),1)
+DEFINES += -DDEBUG
+endif
