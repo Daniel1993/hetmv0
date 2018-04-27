@@ -20,7 +20,6 @@
 #include "bank.h"
 #include "tx_queue.cuh" // TODO: memcd
 
-
 /****************************************************************************
  *	STRUCTURES
  ****************************************************************************/
@@ -31,6 +30,9 @@
 	int 	hashNum;
 	int 	threadNum;
 	int 	blockNum;
+	int 	num_ways;
+	float	hmult;
+	int 	hprob;
 } cuda_config;
 
 /****************************************************************************
@@ -71,14 +73,23 @@ typedef struct HeTM_memcdTx_input_ {
 __global__ void bankTx(PR_globalKernelArgs);
 // __global__ void setup_kernel(curandState *state, unsigned long seed);
 
+__global__ void memcdWriteTx(PR_globalKernelArgs);
+
+__global__
+__launch_bounds__(1024, 1)
+void memcdReadTx(PR_globalKernelArgs);
+
 /****************************************************************************
  *	FUNCTIONS
  ****************************************************************************/
 
 extern "C"
-cuda_config cuda_configInit(int size, int trans, int hash, int tx, int bl);
+cuda_config cuda_configInit(long size, int trans, int hash, int tx, int bl, int hprob, float hmult);
 
 extern "C"
-cudaError_t cuda_configCpy(cuda_config c);
+void cuda_configCpy(cuda_config c);
+
+extern "C"
+cudaError_t cuda_configCpyMemcd(cuda_t *c);
 
 #endif /* _BANK_KERNEL */

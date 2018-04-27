@@ -5,7 +5,7 @@
 
 // TODO: code included
 #include "kernels/BlockingCmp.cuh"
-#include "kernels/CmpKernels.cuh"
+#include "hetm-cmp-kernels.cuh"
 
 /****************************************************************************
  *	GLOBALS
@@ -128,15 +128,3 @@ __global__ void HeTM_knl_finalTxLog2(HeTM_knl_finalTxLog2_s args)
 /****************************************************************************
  *	FUNCTIONS
  ****************************************************************************/
-
-extern "C"
-cudaError_t copyPointer(long pointer) {
-	cudaError_t cudaStatus;
-
-	cudaStatus = cudaMemcpyToSymbol(dev_basePoint, &pointer, sizeof(long), 0, cudaMemcpyHostToDevice);
-	if (cudaStatus != cudaSuccess) {
-		printf("cudaMemcpy to device failed for dev_basePoint!");
-	}
-
-	return cudaStatus;
-}

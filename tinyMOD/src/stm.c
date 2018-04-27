@@ -133,8 +133,6 @@ __thread stm_tx_t* thread_tx = NULL;
 __thread long thread_gc = 0;
 #endif /* defined(TLS_COMPILER) */
 
-__thread HeTM_CPULog_t stm_log_recicled_nodes; // Modified for HeTM
-
 /* ################################################################### *
  * STATIC
  * ################################################################### */
@@ -909,28 +907,6 @@ stm_current_tx(void)
 {
   return tls_get_tx();
 }
-
-#ifdef TM_STATISTICS3
-/*
- * Manually add a value to the transaction log
- */
-_CALLCONV int
-stm_log_add(stm_word_t * pos, long val)
-{
-  TX_GET;
-  return int_stm_log_add(tx->log, pos, val, 0);
-}
-
-/*
- * Manually init the bitmap
- */
-_CALLCONV int
-stm_log_init_bm(void * pointer, int size)
-{
-  TX_GET;
-  return int_stm_log_initBM(tx->log, pointer, size);
-}
-#endif
 
 /* ################################################################### *
  * UNDOCUMENTED STM FUNCTIONS (USE WITH CARE!)

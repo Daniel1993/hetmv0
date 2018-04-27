@@ -11,206 +11,13 @@
 #include "helper_cuda.h"
 #include "helper_timer.h"
 #include <time.h>
+#include <math.h>
 
 #include "bankKernel.cuh"
 #include "bitmap.h"
 
-// __constant__ __device__ long dev_basePoint; // TODO: check how global variables are linked in CUDA
-
-// TODO: implement
-
-#ifdef PR_ARGS_S_EXT
-#undef PR_ARGS_S_EXT
-#endif
-
-#if CMP_TYPE == CMP_EXPLICIT
-/* TODO: need logPos (do every thread commit the same number of transactions?) */
-#define HeTM_GPU_log_explicit_s \
-	unsigned explicitLogBlock; \
-	unsigned *explicitLogOffThr; \
-//
-#define HeTM_GPU_log_explicit_prepare \
-	size_t explicitLogCounter = PR_threadNum*PR_blockNum; \
-	GPU_log->explicitLogOffThr = (unsigned*)memman_ad_hoc_alloc(NULL, NULL, explicitLogCounter*sizeof(unsigned)); \
-	memman_ad_hoc_zero(NULL); \
-	GPU_log->explicitLogBlock = EXPLICIT_LOG_BLOCK; \
-//
-#define HeTM_GPU_log_explicit_before_reads \
-	int tid_ = blockIdx.x*blockDim.x + threadIdx.x; \
-	int explicitLogOffset = tid_ * GPU_log->explicitLogBlock; \
-//
-#define HeTM_GPU_log_explicit_after_reads \
-	GPU_log->explicitLogOffThr[tid_] += BANK_NB_TRANSFERS; \
-//
-#define HeTM_GPU_log_explicit_teardown \
-	memman_ad_hoc_free(NULL); \
-//
-#elif CMP_TYPE == CMP_COMPRESSED
-#define HeTM_GPU_log_explicit_s                  /* empty */
-#define HeTM_GPU_log_explicit_prepare            /* empty */
-#define HeTM_GPU_log_explicit_before_reads       /* empty */
-#define HeTM_GPU_log_explicit_after_reads        /* empty */
-#define HeTM_GPU_log_explicit_teardown           /* empty */
-#else
-// error or disabled
-#define HeTM_GPU_log_explicit_s                  /* empty */
-#define HeTM_GPU_log_explicit_prepare            /* empty */
-#define HeTM_GPU_log_explicit_before_reads       /* empty */
-#define HeTM_GPU_log_explicit_after_reads        /* empty */
-#define HeTM_GPU_log_explicit_teardown           /* empty */
-#endif
-
-#define PR_ARGS_S_EXT \
-	typedef struct { \
-		void *dev_rset; \
-		int *onIntersect; \
-		curandState *state; \
-		long CPUAccountsBasePtr; \
-		HeTM_GPU_log_explicit_s /* Explicit log only */ \
-	} HeTM_GPU_log_s \
-
-#ifdef PR_DEV_BUFF_S_EXT
-#undef PR_DEV_BUFF_S_EXT
-#endif
-
-#define PR_DEV_BUFF_S_EXT \
-	typedef struct { \
-		HeTM_GPU_log_s gpuLog; \
-		curandState *state; \
-	} HeTM_GPU_dbuf_log_s \
-
-#ifdef PR_BEFORE_RUN_EXT
-#undef PR_BEFORE_RUN_EXT
-#endif
-
-#define PR_BEFORE_RUN_EXT(args) ({ \
-	HeTM_GPU_log_s *GPU_log; \
-	memman_alloc_dual("HeTM_gpuLog", sizeof(HeTM_GPU_log_s), MEMMAN_THRLC); \
-	GPU_log = (HeTM_GPU_log_s*)memman_get_cpu(NULL); \
-	/* TODO: explicit log only */ \
-	HeTM_GPU_log_explicit_prepare \
-	/* ---------------------- */ \
-	GPU_log->CPUAccountsBasePtr = (long)args->host.inBuf; \
-	memman_select("HeTM_dev_rset"); \
-	GPU_log->dev_rset = memman_get_gpu(NULL); \
-	memman_select("Stats_OnIntersect"); \
-	GPU_log->onIntersect = (int*)memman_get_gpu(NULL); \
-	GPU_log->state = (curandState*)parsedData.cd->devStates; \
-	args->host.pr_args_ext = (void*)GPU_log; \
-	memman_select("HeTM_gpuLog"); \
-	args->dev.pr_args_ext = memman_get_gpu(NULL); \
-	memman_cpy_to_gpu(NULL); \
-}) \
-
-// TODO: no need of coping back the log
-
-#ifdef PR_AFTER_RUN_EXT
-#undef PR_AFTER_RUN_EXT
-#endif
-
-#define PR_AFTER_RUN_EXT(args) ({ \
-	HeTM_GPU_log_explicit_teardown; \
-	CPY_BACK_DEBUG(); \
-	memman_select("HeTM_gpuLog"); \
-	memman_free_dual(); \
-}) \
-
-#ifdef HETM_DEB
-#define CPY_BACK_DEBUG() \
-	memman_select("Stats_OnIntersect"); \
-	memman_cpy_to_cpu(NULL); \
-	memman_select("HeTM_dev_rset"); \
-	memman_cpy_to_cpu(NULL) \
-//
-#else /* HETM_DEB */
-#define CPY_BACK_DEBUG() /* empty */
-#endif /* HETM_DEB */
-
-#ifdef PR_AFTER_VAL_LOCKS_EXT
-#undef PR_AFTER_VAL_LOCKS_EXT
-#endif
-
-// TODO: is not the addr but the index in the account array (TODO: subtract base addr)!
-
-// Logs the read-set after acquiring the locks
-// TODO: check write/write conflicts
-
-#if CMP_TYPE == CMP_EXPLICIT
-/* TODO: need logPos (do every thread commit the same number of transactions?) */
-#define SET_ON_LOG(addr) \
-	int *explicitLog = (int*)GPU_log->dev_rset; \
-	unsigned logPos = explicitLogOffset + GPU_log->explicitLogOffThr[tid_]; \
-	uintptr_t rsetAddr = (uintptr_t)(addr); \
-	HeTM_bankTx_input_s *ON_LOG_input = (HeTM_bankTx_input_s*)args->inBuf; \
-	uintptr_t devBAddr = (uintptr_t)ON_LOG_input->accounts; \
-	uintptr_t pos = (rsetAddr - devBAddr) >> PR_LOCK_GRAN_BITS; /* stores the index instead of the address */ \
-	explicitLog[logPos + i] = pos+1 /* 0 is NULL */ \
-//
-/*if (GPU_log->explicitLogOffThr[tid_]==98) printf("[%i] explicitLogOffset=%i, explicitLogOffThr=%i, i=%i\n", (int)tid_,\
-(int)explicitLogOffset, (int)GPU_log->explicitLogOffThr[tid_], i);*/ \
-#elif CMP_TYPE == CMP_COMPRESSED
-#define SET_ON_LOG(addr) \
-	uintptr_t rsetAddr = (uintptr_t)(addr); \
-	HeTM_bankTx_input_s *ON_LOG_input = (HeTM_bankTx_input_s*)args->inBuf; \
-	uintptr_t devBAddr = (uintptr_t)ON_LOG_input->accounts; \
-	uintptr_t pos = (rsetAddr - devBAddr) >> PR_LOCK_GRAN_BITS; \
-	unsigned short *RSetBitmap = (unsigned short*)GPU_log->dev_rset; \
-	ByteM_SET_POS(pos, RSetBitmap) \
-//
-#else
-// error or disabled
-#define SET_ON_LOG(addr) /* empty */
-#endif
-
-#define PR_AFTER_VAL_LOCKS_EXT(args) ({ \
-  int i; \
-	HeTM_GPU_log_s *GPU_log = (HeTM_GPU_log_s*)args->pr_args_ext; \
-	/* TODO: explicit log only */ \
-	HeTM_GPU_log_explicit_before_reads \
-	/* ---------------------- */ \
-	for (i = 0; i < args->rset.size; i++) { \
-		SET_ON_LOG(args->rset.addrs[i]); /* add read to devLogR */ \
-	} \
-	/* TODO: explicit logOnly */ \
-	HeTM_GPU_log_explicit_after_reads /* offset of the next transaction */ \
-	/* ---------------------- */ \
-}) \
-
-#ifdef PR_AFTER_WRITEBACK_EXT
-#undef PR_AFTER_WRITEBACK_EXT
-#endif
-
-// Logs the write-set after acquiring the locks (TODO: it is the same in PR_AFTER_VAL_LOCKS_EXT)
-#define PR_AFTER_WRITEBACK_EXT(args, i, addr, val) ({ \
-	/* HeTM_GPU_log_s *GPU_log = (HeTM_GPU_log_s*)args->pr_args_ext; */ \
-	/* SET_ON_LOG(addr); TODO: add write to BM */ \
-}) \
-
 #include "pr-stm-wrapper.cuh" // enables the granularity
 #include "pr-stm-internal.cuh"
-
-// --------------------
-__constant__ __device__ unsigned PR_seed = 1234; // TODO: set seed
-
-__global__ void setupKernel(void *args)
-{
-	curandState *state = (curandState*)args;
-	int id = threadIdx.x + blockDim.x*blockIdx.x;
-	curand_init(PR_seed, id, 0, &state[id]);
-}
-
-__device__ unsigned PR_i_rand(pr_tx_args_dev_host_s args, unsigned n)
-{
-	HeTM_GPU_log_s *GPU_log = (HeTM_GPU_log_s*)args.pr_args_ext;
-	curandState *state = GPU_log->state;
-	int id = PR_THREAD_IDX;
-	int x = 0;
-	curandState localState = state[id];
-	x = curand(&localState);
-	state[id] = localState;
-	return x % n;
-}
-// --------------------
 
 //versions in global memory	10 bits(version),0 bits (padding),20 bits(owner threadID),1 bit(LOCKED),1 bit(pre-locked)
 #define	offVers	22
@@ -230,11 +37,14 @@ __device__ unsigned PR_i_rand(pr_tx_args_dev_host_s args, unsigned n)
  *	GLOBALS
  ****************************************************************************/
 
-__constant__ __device__ long size;
-__constant__ __device__ int  TransEachThread;
+__constant__ __device__ long  size;
 // __constant__ __device__ const int BANK_NB_TRANSFERS;
-__constant__ __device__ int  hashNum;
-__constant__ __device__ int  num_ways; // TODO: init
+__constant__ __device__ int   hashNum;
+__constant__ __device__ int   num_ways; // TODO: init
+__constant__ __device__ int   txsPerGPUThread;
+__constant__ __device__ int   txsInKernel;
+__constant__ __device__ int   hprob;
+__constant__ __device__ float hmult;
 
 /****************************************************************************
  *	KERNELS
@@ -249,49 +59,43 @@ __constant__ __device__ int  num_ways; // TODO: init
 // +------------------+--------------+
 //
 // random Function random several different numbers and store them into idx(Local array which stores idx of every source in Global memory).
-__device__ void random_Kernel(PR_txCallDefArgs, int *idx, curandState* state, int size, int is_intersection)
+__device__ void random_Kernel(PR_txCallDefArgs, int *idx, int size, int is_intersection)
 {
-	int i, j;
-	HeTM_GPU_log_s *GPU_log = (HeTM_GPU_log_s*)args.pr_args_ext;
-	int id = threadIdx.x+blockDim.x*blockIdx.x;
+	int i = 0;
 
-	// generates the target accounts for the transaction
-	for (i = 0; i < BANK_NB_TRANSFERS; i++) {
-		int m = 0;
-		int is_intersect = is_intersection; //IS_INTERSECT_HIT(PR_rand(100000));
+#if BANK_PART == 1
+	// break the dataset in CPU/GPU
+	int is_intersect = is_intersection; //IS_INTERSECT_HIT(PR_rand(100000));
+#endif
 
-		// accounts must be different
-		while (m < 1) {
-			int randVal = PR_rand(INT_MAX);
-			// TODO: the size becomes useless
-			if (is_intersect) {
-				GPU_log->onIntersect[id]++;
-				idx[i] = INTERSECT_ACCESS(randVal, size);
-			} else {
-				idx[i] = GPU_ACCESS(randVal, size);
-			}
-			bool hasEqual = 0;
-
-			// idx array is traveled to check repeated accesses
-			for (j = 0; j < i; j++)	{
-				if (idx[i] == idx[j]) {
-					hasEqual = 1;
-					break;
-				}
-			}
-			if (hasEqual != 1) {
-				// if it is not repeated goto i++ in the outer for loop
-				m++; // break while (m < 1)
-			}
-		}
+	int randVal = PR_rand(INT_MAX);
+#if BANK_PART == 1
+	if (is_intersect) {
+		idx[i] = INTERSECT_ACCESS_GPU(randVal, size-BANK_NB_TRANSFERS);
+	} else {
+		idx[i] = GPU_ACCESS(randVal, size-BANK_NB_TRANSFERS);
 	}
-	/*idx[0] = generate_kernel(state,100)%size;
-	for (int i = 0; i < BANK_NB_TRANSFERS; i++)
-	{
-	idx[i] = (idx[0]+i)%size;
-	}*/
+#elif BANK_PART == 2
+	int is_hot = IS_ACCESS_H(randVal, hprob);
+	randVal = PR_rand(INT_MAX);
+	if (is_hot) {
+		idx[i] = GPU_ACCESS_H(randVal, hmult, size);
+	} else {
+		idx[i] = GPU_ACCESS_M(randVal, 3*hmult, size);
+	}
+#else
+	idx[i] = INTERSECT_ACCESS_GPU(randVal, size-BANK_NB_TRANSFERS);
+#endif
+
+	// TODO: accounts are consecutive
+	// generates the target accounts for the transaction
+	for (i = 1; i < BANK_NB_TRANSFERS; i++) {
+		idx[i] = (idx[i-1] + i) % GPU_TOP_IDX(size);
+	}
 }
 
+#define COMPUTE_TRANSFER(val) \
+	val // TODO: do math that does not kill the final result
 
 /*********************************
  *	bankTx()
@@ -316,33 +120,65 @@ __global__ void bankTx(PR_globalKernelArgs)
 	size_t nbAccounts = input->nbAccounts;
 	HeTM_GPU_log_s *GPU_log = (HeTM_GPU_log_s*)args.pr_args_ext;
 
-	random_Kernel(PR_txCallArgs, idx, GPU_log->state, nbAccounts, is_intersection);	//get random index
+  // TODO: it was txsPerGPUThread * iterations
+	while (i++ < txsPerGPUThread) { // each thread need to commit x transactions
 
-  // TODO: it was TransEachThread * iterations
-	while (i++ < TransEachThread) { // each thread need to commit x transactions
+		// before the transaction pick the accounts (needs PR-STM stuff)
+		random_Kernel(PR_txCallArgs, idx, nbAccounts, is_intersection); //get random index
+
+#ifndef BANK_DISABLE_PRSTM
 		PR_txBegin();
+#endif
 
 		// reads the accounts first, then mutates the locations
 		for (j = 0; j < BANK_NB_TRANSFERS; j++)	{
+			if (idx[j] < 0 || idx[j] >= nbAccounts) {
+	      break;
+	    }
+			// TODO: make the GPU slower
+#ifndef BANK_DISABLE_PRSTM
 			reads[j] = PR_read(accounts + idx[j]);
 			if (pr_args.is_abort) break; // PR_txBegin is a simple while loop
+#else /* PR-STM disabled */
+			reads[j] = accounts[idx[j]];
+#endif
 		}
 
+#ifndef BANK_DISABLE_PRSTM
 		if (pr_args.is_abort) { PR_txRestart(); } // optimization
+#endif
 
-		for (j = 0; j < BANK_NB_TRANSFERS / 2; j++) {
+		for (j = 0; j < BANK_NB_TRANSFERS / 2; ++j) {
+			// TODO: make the GPU slower
 			target = j*2;
-			nval = reads[target] - 1; // -money
+			if (idx[j] < 0 || idx[j] >= nbAccounts || idx[target] < 0 || idx[target] >= nbAccounts) {
+				break;
+			}
+			__syncthreads();
+			nval = COMPUTE_TRANSFER(reads[target] - 1); // -money
+#ifndef BANK_DISABLE_PRSTM
 			PR_write(accounts + idx[target], nval); //write changes to write set
 			if (pr_args.is_abort) break;
+#else /* PR-STM disabled */
+			accounts[idx[target]] = nval; //write changes to write set
+#endif
 
 			target = j*2+1;
-			nval = reads[target] + 1; // +money
+			__syncthreads();
+			nval = COMPUTE_TRANSFER(reads[target] + 1); // +money
+#ifndef BANK_DISABLE_PRSTM
 			PR_write(accounts + idx[target], nval); //write changes to write set
 			if (pr_args.is_abort) break;
+#else /* PR-STM disabled */
+			accounts[idx[target]] = nval; //write changes to write set
+#endif
 		}
+#ifndef BANK_DISABLE_PRSTM
 		if (pr_args.is_abort) { PR_txRestart(); } // optimization
 		PR_txCommit();
+#else
+		if (args.nbCommits != NULL) args.nbCommits[PR_THREAD_IDX]++;
+#endif
 	}
 
 	PR_exitKernel();
@@ -366,27 +202,32 @@ void memcdReadTx(PR_globalKernelArgs)
 	int idx[NUMBER_WAYS];
 	int reads[NUMBER_WAYS];
 	int id = threadIdx.x+blockDim.x*blockIdx.x;
+	int j;
+	int goal = 0;
+
+	// if (id == 0) printf("Enter memcdReadTx\n");
 
 	HeTM_memcdTx_input_s *input = (HeTM_memcdTx_input_s*)args.inBuf;
 
-	int goal = 0;
+	// if (id == 0) printf(" -------------------- \n");
 
 	idx[0] = input->tx_queue[id] * num_ways;
 
-	for (int j = 1; j < num_ways; j++) {
+	for (j = 1; j < num_ways; j++) {
 		idx[j] = idx[0] + j;
 	}
 
-	goal =  input->tx_queue[id] & 0xffff;
+	goal = input->tx_queue[id] & 0xffff;
 	goal = (goal % num_ways);
 
 	PR_txBegin();
 
-	for (int j = 0; j <= goal; j++) {
-		reads[j] = PR_read(input->accounts + idx[j]);
+	for (j = 0; j < goal; j++) {
+		reads[j] = PR_read(&input->accounts[idx[j]]);
+		// printf("[%2i] read %6i j=%i goal=%i is_abort=%i\n", id, idx[j], j, goal, pr_args.is_abort);
 		if (pr_args.is_abort) break;
 	}
-
+  //
 	if (pr_args.is_abort) { PR_txRestart(); }
 
 	PR_txCommit();
@@ -395,47 +236,56 @@ void memcdReadTx(PR_globalKernelArgs)
 	input->output[id].index  = idx[goal];
 	input->ts_vec[idx[goal]] = input->clock_value;
 
+	// if (id == 0) printf("Exit memcdReadTx\n");
 	PR_exitKernel();
 }
+
+// TODO: IMPORTANT ---> set PR_MAX_RWSET_SIZE to number of ways
 
 /*********************************
  *	writeKernelTransaction()
  *
  *  Main PR-STM transaction kernel
  **********************************/
-__global__ void writeKernelTransaction (PR_globalKernelArgs)
+__global__ void memcdWriteTx(PR_globalKernelArgs)
 {
 	PR_enterKernel();
 
 	int idx[NUMBER_WAYS];
 	int reads[NUMBER_WAYS];
-	int id = threadIdx.x+blockDim.x*blockIdx.x;
 	int i = 0;
-	int min_val = -1, min_pos=0;
+	int min_val = -1, min_pos = 0;
+	int id = threadIdx.x+blockDim.x*blockIdx.x;
+	int goal = 0;
+	int nbAborts = 0;
 
 	HeTM_memcdTx_input_s *input = (HeTM_memcdTx_input_s*)args.inBuf;
 
-	int goal = 0;
+	// TODO: always 0 (CPU must tell where to write)
+	// input->tx_queue[id] = (id/num_ways) % input->nbAccounts;
 
 	idx[0] = input->tx_queue[id] * num_ways;
+
 	for (int j = 1; j < num_ways; j++) {
-		idx[j] = idx[0] + j;
+		idx[j] = (idx[0] + j) % input->nbAccounts; // TODO: what is going on!?!?
 	}
 
 	goal = input->tx_queue[id] & 0xffff;
 
-	while (i < TransEachThread) { //each thread need to commit x transactions
+	for (i = 0; i < txsInKernel; ++i) { // each thread need to commit x transactions
 
 		PR_txBegin();
-
+		nbAborts++;
+		if (nbAborts > 10) break; // TODO: some deadlock here (WTF is this doing?)
 		min_val = -1;
-		min_pos=0;
+		min_pos = 0;
 
-		/*Search hash table for an empty spot or an entry to evict*/
+		/* Search hash table for an empty spot or an entry to evict */
 		for (int j = 0; j < num_ways; j++) {
-			reads[j] = PR_read(input->accounts + idx[j]);
+			reads[j] = PR_read(&input->accounts[idx[j]]);
+			if (pr_args.is_abort) { PR_txRestart(); }
 
-			//Check if it is free or if it is the same value
+			// Check if it is free or if it is the same value
 			if (reads[j] == goal || input->ts_vec[idx[j]] == 0) {
 				min_pos = j;
 				break;
@@ -446,28 +296,28 @@ __global__ void writeKernelTransaction (PR_globalKernelArgs)
 				}
 			}
 		}
+		PR_write(&input->accounts[idx[min_pos]], goal);
 		if (pr_args.is_abort) { PR_txRestart(); }
-		PR_write(input->accounts + idx[min_pos], goal);
+
 		PR_txCommit();
 
 		input->output[id].key = goal;
 		input->output[id].index = idx[min_pos];
 		input->ts_vec[idx[min_pos]] = input->clock_value;
-		i++;
 	}
 
+	// if (id == 0) printf("Exit memcdWriteTx\n");
 	PR_exitKernel();
 }
 // ----------------------
-
-
 
 /****************************************************************************
  *	FUNCTIONS
 /****************************************************************************/
 
 extern "C"
-cuda_config cuda_configInit(int size, int trans, int hash, int tx, int bl) {
+cuda_config cuda_configInit(long size, int trans, int hash, int tx, int bl, int hprob, float hmult)
+{
 	cuda_config c;
 
 	c.size = size;
@@ -475,46 +325,38 @@ cuda_config cuda_configInit(int size, int trans, int hash, int tx, int bl) {
 	c.hashNum = hash > 0 ? hash : DEFAULT_hashNum;
 	c.threadNum = tx > 0 ? tx : DEFAULT_threadNum;
 	c.blockNum = bl > 0 ? bl : DEFAULT_blockNum;
+	c.hprob = hprob > 0 ? hprob : DEFAULT_HPROB;
+	c.hmult = hmult > 0 ? hmult : DEFAULT_HMULT;
 	// c.BANK_NB_TRANSFERS = (BANK_NB_TRANSFERS > 1 && ((BANK_NB_TRANSFERS & 1) == 0)) ? BANK_NB_TRANSFERS : 2; // DEFAULT_BANK_NB_TRANSFERS
 
 	return c;
 }
 
 extern "C"
-cudaError_t cuda_configCpy(cuda_config c) {
+cudaError_t cuda_configCpyMemcd(cuda_t *c)
+{
 	cudaError_t cudaStatus;
 	int err = 1;
 
 	while (err) {
-		err=0;
-		void * point1 = &c.size;
-		cudaStatus = cudaMemcpyToSymbol(size, point1, sizeof(long), 0, cudaMemcpyHostToDevice );
-		if ( cudaStatus  != cudaSuccess) {
+		err = 0;
+		cudaStatus = cudaMemcpyToSymbol(num_ways, &c->num_ways, sizeof(int), 0, cudaMemcpyHostToDevice);
+		if (cudaStatus != cudaSuccess) {
 			printf("cudaMemcpy to device failed for size!");
 			continue;
 		}
-		void * point2 = &c.TransEachThread;
-		cudaStatus = cudaMemcpyToSymbol(TransEachThread, point2, sizeof(int), 0, cudaMemcpyHostToDevice );
-		if ( cudaStatus  != cudaSuccess) {
-			printf("cudaMemcpy to device failed for TransEachThread!");
-			continue;
-		}
-		void * point3 = &c.hashNum;
-		cudaStatus = cudaMemcpyToSymbol(hashNum, point3, sizeof(int), 0, cudaMemcpyHostToDevice );
-		if ( cudaStatus  != cudaSuccess) {
-			printf("cudaMemcpy to device failed for hashNum!");
-			continue;
-		}
-		// TODO: find a way of passing BANK_NB_TRANSFERS
-		// void * point4 = &c.BANK_NB_TRANSFERS;
-		// cudaStatus = cudaMemcpyToSymbol(BANK_NB_TRANSFERS, point4, sizeof(int),0, cudaMemcpyHostToDevice );
-		// if ( cudaStatus  != cudaSuccess) {
-		// 	printf("cudaMemcpy to device failed for BANK_NB_TRANSFERS!");
-		// 	continue;
-		// }
 	}
-	/*cudaMemcpyFromSymbol(&c.hashNum,"hashNum",sizeof(int));
-	printf("hashNum: %d\n",c.hashNum);*/
-
 	return cudaStatus;
+}
+
+extern "C"
+void cuda_configCpy(cuda_config c)
+{
+	CUDA_CHECK_ERROR(cudaMemcpyToSymbol(size, &c.size, sizeof(long), 0, cudaMemcpyHostToDevice ), "");
+	CUDA_CHECK_ERROR(cudaMemcpyToSymbol(hashNum, &c.hashNum, sizeof(int), 0, cudaMemcpyHostToDevice ), "");
+	CUDA_CHECK_ERROR(cudaMemcpyToSymbol(txsInKernel, &c.TransEachThread, sizeof(int), 0, cudaMemcpyHostToDevice), "");
+	CUDA_CHECK_ERROR(cudaMemcpyToSymbol(txsPerGPUThread, &c.TransEachThread, sizeof(int), 0, cudaMemcpyHostToDevice), "");
+	CUDA_CHECK_ERROR(cudaMemcpyToSymbol(hprob, &c.hprob, sizeof(int), 0, cudaMemcpyHostToDevice), "");
+	CUDA_CHECK_ERROR(cudaMemcpyToSymbol(hmult, &c.hmult, sizeof(float), 0, cudaMemcpyHostToDevice), "");
+	// TODO: find a way of passing BANK_NB_TRANSFERS
 };

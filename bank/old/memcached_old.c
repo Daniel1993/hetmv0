@@ -44,7 +44,7 @@ void perror(const char *s);
 
 #include "stm.h"
 #include "mod_ab.h"
-#include "log.h"
+#include "hetm-log.h"
 #include "cuda_defines.h"
 #include "utils.h"
 #include "shared.h"

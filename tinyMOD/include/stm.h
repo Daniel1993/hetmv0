@@ -861,10 +861,6 @@ int tm_hybrid(TXPARAM);
 void tm_restart_software(TXPARAM);
 #endif /* HYBRID_ASF */
 
-/* LOG */
-int stm_log_add(stm_word_t * pos, long val);
-int stm_log_init_bm(void * pointer, int size);
-
 #ifdef __cplusplus
 }
 #endif

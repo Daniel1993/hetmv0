@@ -181,7 +181,6 @@ static void *test(void *data)
   // INIT stream
   void * readFromTiny = NULL;
 	int total_el = 0;
-	HeTM_CPULogNode_t * logAux;
 	cmp_status state = FINAL;
 	int n = 0, count = 0, res = 0;
 	stream_t *s = jobWithCuda_initStream(d->cd, d->id, STREAM_COUNT);
@@ -591,7 +590,7 @@ int main(int argc, char **argv)
     // reset accounts
     memset(bank->accounts, 0, bank->size * sizeof(account_t));
 
-    TIMER_READ(parsedData.final);
+    TIMER_READ(parsedData.last);
 
     bank_printStats(&parsedData);
 

@@ -26,8 +26,8 @@
 #ifndef _UTILS_H_
 #define _UTILS_H_
 
-#include <cuda.h>
-#include <cuda_runtime.h>
+// #include <cuda.h>
+// #include <cuda_runtime.h>
 #include <stdio.h>
 #include <stdlib.h>
 

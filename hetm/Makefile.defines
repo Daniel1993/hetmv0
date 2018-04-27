@@ -1,0 +1,50 @@
+# VERY IMPORTANT: you must set the R/W-set maximum size for PR-STM (benchmark dependent)
+PR_MAX_RWSET_SIZE ?= 2
+CMP_TYPE          ?= COMPRESSED
+LOG_TYPE          ?= VERS
+PROFILE           ?= 0
+
+SYS_CPU_MAX_FREQ=$(shell cat /sys/devices/system/cpu/cpu0/cpufreq/cpuinfo_max_freq)
+SYS_CPU_NB_CORES=$(shell cat /proc/cpuinfo | grep processor | wc -l)
+
+DEFINES += \
+  -DPR_MAX_RWSET_SIZE=$(PR_MAX_RWSET_SIZE) \
+  -DSYS_CPU_MAX_FREQ=$(SYS_CPU_MAX_FREQ) \
+  -DSYS_CPU_NB_CORES=$(SYS_CPU_NB_CORES) \
+
+ifeq ($(DISABLE_CHUNKS),1)
+DEFINES += -DHETM_DISABLE_CHUNKS=1
+endif
+
+############
+### CMP_TYPE
+ifeq ($(CMP_TYPE),COMPRESSED)
+DEFINES += -DHETM_CMP_TYPE=1
+endif
+ifeq ($(CMP_TYPE),EXPLICIT)
+DEFINES += -DHETM_CMP_TYPE=2
+endif
+ifeq ($(CMP_TYPE),DISABLED)
+DEFINES += -DHETM_CMP_TYPE=0
+endif
+############
+
+############
+### LOG_TYPE
+ifeq ($(LOG_TYPE),VERS)
+DEFINES += -DHETM_LOG_TYPE=1
+endif
+ifeq ($(LOG_TYPE),VERS2)
+DEFINES += -DHETM_LOG_TYPE=4
+endif
+ifeq ($(LOG_TYPE),ADDR)
+DEFINES += -DHETM_LOG_TYPE=2
+endif
+ifeq ($(LOG_TYPE),BMAP)
+DEFINES += -DHETM_LOG_TYPE=3
+endif
+############
+
+ifeq ($(PROFILE),1)
+DEFINES += -DUSE_NVTX
+endif

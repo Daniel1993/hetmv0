@@ -15,8 +15,6 @@
 #include "bankKernel.cuh"
 #include "bitmap.h"
 
-// __constant__ __device__ long dev_basePoint; // TODO: check how global variables are linked in CUDA
-
 // TODO: implement
 
 #ifdef PR_MAX_RWSET_SIZE
@@ -27,7 +25,7 @@
 #undef PR_ARGS_S_EXT
 #endif
 
-#if CMP_TYPE == CMP_EXPLICIT
+#if HETM_CMP_TYPE == HETM_CMP_EXPLICIT
 /* TODO: need logPos (do every thread commit the same number of transactions?) */
 #define HeTM_GPU_log_explicit_s \
 	unsigned explicitLogBlock; \
@@ -49,7 +47,7 @@
 #define HeTM_GPU_log_explicit_teardown \
 	memman_ad_hoc_free(NULL); \
 //
-#elif CMP_TYPE == CMP_COMPRESSED
+#elif HETM_CMP_TYPE == HETM_CMP_COMPRESSED
 #define HeTM_GPU_log_explicit_s                  /* empty */
 #define HeTM_GPU_log_explicit_prepare            /* empty */
 #define HeTM_GPU_log_explicit_before_reads       /* empty */
@@ -117,7 +115,7 @@
 // Logs the read-set after acquiring the locks
 // TODO: check write/write conflicts
 
-#if CMP_TYPE == CMP_EXPLICIT
+#if HETM_CMP_TYPE == HETM_CMP_EXPLICIT
 /* TODO: need logPos (do every thread commit the same number of transactions?) */
 #define SET_ON_LOG(addr) \
 	int *explicitLog = (int*)GPU_log->dev_rset; \
@@ -129,7 +127,7 @@
 //
 /*if (GPU_log->explicitLogOffThr[tid_]==98) printf("[%i] explicitLogOffset=%i, explicitLogOffThr=%i, i=%i\n", (int)tid_,\
 (int)explicitLogOffset, (int)GPU_log->explicitLogOffThr[tid_], i);*/ \
-#elif CMP_TYPE == CMP_COMPRESSED
+#elif HETM_CMP_TYPE == HETM_CMP_COMPRESSED
 #define SET_ON_LOG(addr) \
 	uintptr_t rsetAddr = (uintptr_t)(addr); \
 	uintptr_t devBAddr = (uintptr_t)args->inBuf; \

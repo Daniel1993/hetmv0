@@ -4,7 +4,7 @@
 
 #include "shared.h"
 #include "thread.h"
-#include "timer.h"
+#include "hetm-timer.h"
 #include "cuda_wrapper.h"
 
 #include <assert.h>
@@ -50,7 +50,7 @@ void perror(const char *s);
 
 #include "stm.h"
 #include "mod_ab.h"
-#include "log.h"
+#include "hetm-log.h"
 #include "cuda_defines.h"
 
 #ifndef USE_TSX_IMPL
@@ -65,7 +65,7 @@ static unsigned int tiny_aborts, tiny_commits;
 #define TM_LOG(val)              //stm_log_add(0,val)
 #define TM_LOG2(pos,val)         //stm_log_add(pos,val)
 #define TM_FREE(point)           //stm_logel_free(point)
-#define TM_GET_LOG(p)            stm_get_stats("HeTM_CPULog", &p);
+#define TM_GET_LOG(p)            p = stm_thread_local_log;
 #define TM_GET_NB_COMMITS(var)   var = tiny_aborts
 #define TM_GET_NB_FALLBACK(var)  var = 0
 #define TM_GET_NB_ABORTS(var)    var = tiny_commits

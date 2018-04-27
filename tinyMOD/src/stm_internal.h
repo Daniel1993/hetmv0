@@ -33,7 +33,7 @@
 #include "utils.h"
 #include "atomic.h"
 #include "gc.h"
-#include "log.h"
+#include "hetm-log.h"
 
 /* ################################################################### *
  * DEFINES
@@ -367,9 +367,9 @@ typedef struct stm_tx {                 /* Transaction descriptor */
   unsigned int stat_locked_reads_failed;/* Failed reads of previous value */
 # endif /* READ_LOCKED_DATA */
 #endif /* TM_STATISTICS2 */
-#ifdef TM_STATISTICS3
-  HeTM_CPULog_t *log;							/*Transaction Log*/
-#endif /* TM_STATISTICS3 */
+#ifdef HETM_INSTRUMENT_CPU
+  HETM_LOG_T *log;                   /*Transaction Log*/
+#endif /* HETM_INSTRUMENT_CPU */
 } stm_tx_t;
 
 /* This structure should be ordered by hot and cold variables */
@@ -1264,9 +1264,9 @@ int_stm_init_thread(void)
   tx->stat_locked_reads_failed = 0;
 # endif /* READ_LOCKED_DATA */
 #endif /* TM_STATISTICS2 */
-#ifdef TM_STATISTICS3
+#ifdef HETM_INSTRUMENT_CPU
   tx->log = stm_log_init();
-#endif /* TM_STATISTICS3 */
+#endif /* HETM_INSTRUMENT_CPU */
 #ifdef HYBRID_ASF
   tx->software = 0;
 #endif /* HYBRID_ASF */
@@ -1316,7 +1316,7 @@ int_stm_exit_thread(stm_tx_t *tx)
     printf("Thread %p | commits:%12u avg_aborts:%12.2f max_retries:%12u\n", (void *)pthread_self(), tx->stat_commits, avg_aborts, tx->stat_retries_max);
   }
 #endif /* TM_STATISTICS */
-#ifdef TM_STATISTICS3
+#ifdef HETM_INSTRUMENT_CPU
   stm_log_free(tx->log);
 #endif /* TM_STATISTICS */
 
@@ -1624,12 +1624,6 @@ int_stm_get_stats(stm_tx_t *tx, const char *name, void *val)
   }
 # endif /* READ_LOCKED_DATA */
 #endif /* TM_STATISTICS2 */
-#ifdef TM_STATISTICS3
-  if (strcmp("HeTM_CPULog", name) == 0) {
-    *(HeTM_CPULogNode_t **)val = stm_log_read(tx->log);
-    return 1;
-  }
-#endif
   return 0;
 }
 
@@ -1646,19 +1640,5 @@ int_stm_get_specific(stm_tx_t *tx, int key)
   assert (tx != NULL && key >= 0 && key < _tinystm.nb_specific);
   return (void *)ATOMIC_LOAD(&tx->data[key]);
 }
-
-#ifdef TM_STATISTICS3
-static INLINE int
-int_stm_log_add(HeTM_CPULog_t *log, stm_word_t * pos, long val, stm_word_t vers)
-{
-  return stm_log_newentry(log, (long*)pos, val, vers);
-}
-
-static INLINE int
-int_stm_log_initBM(HeTM_CPULog_t *log, stm_word_t * pointer, int size)
-{
-  return stm_log_initBM(log, (long*)pointer, size);
-}
-#endif
 
 #endif /* _STM_INTERNAL_H_ */

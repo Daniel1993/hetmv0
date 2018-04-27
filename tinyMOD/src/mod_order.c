@@ -30,6 +30,7 @@
 #include "atomic.h"
 #include "utils.h"
 #include "mod_order.h"
+#include "rdtsc.h"
 
 #define KILL_SELF                      0x00
 #define KILL_OTHER                     0x01
@@ -44,6 +45,8 @@ static void mod_order_on_start(void *arg)
 {
   stm_word_t ts;
   /* Get a timestamp for commit */
+  // TODO: how bad is this:
+  // ts = rdtscp();
   ts = ATOMIC_FETCH_INC_FULL(&mod_order_ts_next);
   stm_set_specific(mod_order_key, (void *)ts);
 }

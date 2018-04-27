@@ -39,7 +39,6 @@
   printf("    HETM_CPU_EN    =%i\n", HETM_CPU_EN); \
   printf("    HETM_GPU_EN    =%i\n", HETM_GPU_EN); \
   printf("    CMP_APPLY      =%i\n", CMP_APPLY); \
-  printf("    LOG_AUTO       =%i\n", LOG_AUTO); \
   printf("    SYNC_BALANCING =%i\n", SYNC_BALANCING_VALUE); \
   printf("    RUN_ONCE       =%i\n", RUN_ONCE); \
   printf("    CPU_INV        =%i\n", CPU_INV_VALUE); \

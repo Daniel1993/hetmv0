@@ -39,8 +39,8 @@ include Makefile.common
 # Refer to [PPoPP-08] for more details.
 ########################################################################
 
-DEFINES += -DDESIGN=WRITE_BACK_ETL
-# DEFINES += -DDESIGN=WRITE_BACK_CTL
+# DEFINES += -DDESIGN=WRITE_BACK_ETL
+DEFINES += -DDESIGN=WRITE_BACK_CTL
 # DEFINES += -DDESIGN=WRITE_THROUGH
 # DEFINES += -DDESIGN=MODULAR
 
@@ -103,13 +103,14 @@ DEFINES += -DIRREVOCABLE_ENABLED
 # Statistics3 = Log
 ########################################################################
 
- DEFINES += -DTM_STATISTICS
+DEFINES += -DTM_STATISTICS
 # DEFINES += -UTM_STATISTICS
- DEFINES += -DTM_STATISTICS2
+DEFINES += -DTM_STATISTICS2
 # DEFINES += -UTM_STATISTICS2
- DEFINES += -DTM_STATISTICS3
-# DEFINES += -UTM_STATISTICS3
 
+### changed to HETM_INSTRUMENT_CPU
+# DEFINES += -DHETM_INSTRUMENT_CPU
+# DEFINES += -UHETM_INSTRUMENT_CPU
 
 ########################################################################
 # Prevent duplicate entries in read/write sets when accessing the same
@@ -309,7 +310,7 @@ all:	$(TMLIB)
 
 # Additional dependencies
 $(SRCDIR)/stm.o:	$(INCDIR)/stm.h
-$(SRCDIR)/stm.o:	$(SRCDIR)/stm_internal.h $(SRCDIR)/stm_wt.h $(SRCDIR)/stm_wbetl.h $(SRCDIR)/stm_wbctl.h $(SRCDIR)/tls.h $(SRCDIR)/utils.h $(SRCDIR)/atomic.h $(SRCDIR)/log.h
+$(SRCDIR)/stm.o:	$(SRCDIR)/stm_internal.h $(SRCDIR)/stm_wt.h $(SRCDIR)/stm_wbetl.h $(SRCDIR)/stm_wbctl.h $(SRCDIR)/tls.h $(SRCDIR)/utils.h $(SRCDIR)/atomic.h
 
 %.s:	%.c Makefile
 	$(CC) $(CPPFLAGS) $(CFLAGS) -DCOMPILE_FLAGS="$(CPPFLAGS) $(CFLAGS)" -fverbose-asm -S -o $@ $<

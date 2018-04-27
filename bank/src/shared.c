@@ -41,6 +41,9 @@ void bank_parseArgs(int argc, char **argv, thread_data_t *data)
   data->read_all          = DEFAULT_READ_ALL;
   data->read_threads      = DEFAULT_READ_THREADS;
   data->seed              = DEFAULT_SEED;
+  data->stddev            = DEFAULT_SEED;
+  data->hmult             = DEFAULT_HMULT;
+  data->hprob             = DEFAULT_HPROB;
   data->write_all         = DEFAULT_WRITE_ALL;
   data->write_threads     = DEFAULT_WRITE_THREADS;
   data->iter              = DEFAULT_ITERATIONS;
@@ -49,6 +52,9 @@ void bank_parseArgs(int argc, char **argv, thread_data_t *data)
   data->num_ways          = NUMBER_WAYS;
   data->shared_percent    = QUEUE_SHARED_VALUE;
   data->set_percent       = WRITE_PERCENT;
+  data->GPUblockNum       = DEFAULT_blockNum;
+  data->GPUthreadNum      = DEFAULT_threadNum;
+
   struct option long_options[] = {
     // These options don't set a flag
     {"help",                no_argument,       NULL, 'h'},
@@ -56,24 +62,24 @@ void bank_parseArgs(int argc, char **argv, thread_data_t *data)
     {"contention-manager",  required_argument, NULL, 'c'},
     {"duration",            required_argument, NULL, 'd'},
     {"num-threads",         required_argument, NULL, 'n'},
-    {"read-all-rate",       required_argument, NULL, 'r'},
-    {"read-threads",        required_argument, NULL, 'R'},
-    {"seed",                required_argument, NULL, 's'},
-    {"write-all-rate",      required_argument, NULL, 'w'},
-    {"write-threads",       required_argument, NULL, 'W'},
+    {"hmult",               required_argument, NULL, 's'},
+    {"hprob",               required_argument, NULL, 'm'},
     {"num-iterations",      required_argument, NULL, 'i'},
     {"trfs",                required_argument, NULL, 't'},
     {"gpu-blocks",          required_argument, NULL, 'b'},
     {"gpu-threads",         required_argument, NULL, 'x'},
     {"tperthread",          required_argument, NULL, 'T'},
     {"output-file",         required_argument, NULL, 'f'},
+    {"shared-rate",         required_argument, NULL, 'S'},
+  	{"new-rate",            required_argument, NULL, 'N'},
+  	{"number-ways",         required_argument, NULL, 'l'},
     {"disjoint",            no_argument,       NULL, 'j'},
     {NULL, 0, NULL, 0}
   };
 
   while(1) {
     i = 0;
-    c = getopt_long(argc, argv, "ha:c:d:n:r:R:s:w:W:i:t:T:f:jb:x:", long_options, &i);
+    c = getopt_long(argc, argv, "ha:d:n:s:m:i:t:T:f:jb:x:S:N:l:", long_options, &i);
 
     if(c == -1)
       break;
@@ -96,28 +102,24 @@ void bank_parseArgs(int argc, char **argv, thread_data_t *data)
           "        Print this message\n"
           "  -a, --accounts <int>\n"
           "        Number of accounts in the bank (default=" XSTR(DEFAULT_NB_ACCOUNTS) ")\n"
-  #ifndef TM_COMPILER
-          "  -c, --contention-manager <string>\n"
-          "        Contention manager for resolving conflicts (default=suicide)\n"
-  #endif /* ! TM_COMPILER */
           "  -d, --duration <int>\n"
           "        Test duration in milliseconds (0=infinite, default=" XSTR(DEFAULT_DURATION) ")\n"
           "  -n, --num-threads <int>\n"
           "        Number of threads (default=" XSTR(DEFAULT_NB_THREADS) ")\n"
-          "  -r, --read-all-rate <int>\n"
-          "        Percentage of read-all transactions (default=" XSTR(DEFAULT_READ_ALL) ")\n"
-          "  -R, --read-threads <int>\n"
-          "        Number of threads issuing only read-all transactions (default=" XSTR(DEFAULT_READ_THREADS) ")\n"
-          "  -s, --seed <int>\n"
-          "        RNG seed (0=time-based, default=" XSTR(DEFAULT_SEED) ")\n"
-          "  -w, --write-all-rate <int>\n"
-          "        Percentage of write-all transactions (default=" XSTR(DEFAULT_WRITE_ALL) ")\n"
-          "  -W, --write-threads <int>\n"
-          "        Number of threads issuing only write-all transactions (default=" XSTR(DEFAULT_WRITE_THREADS) ")\n"
+          "  -s, --hmult <float>\n"
+          "        Size of the hotspot s in ]0, 1[ (rest is 3*hmult, compile with BANK_PART=2 default=" XSTR(DEFAULT_HMULT) ")\n"
+          "  -m, --hprob <int>\n"
+          "        Probability of hitting the hotspot (compile with BANK_PART=2 default=" XSTR(DEFAULT_HPROB) ")\n"
           "  -i, --num-iterations <int>\n"
           "        Number of iterations to execute (default=" XSTR(DEFAULT_ITERATIONS) ")\n"
           "  -t, --num-transfers <int>\n"
           "        Number of accounts to transfer between in each transaction (default=" XSTR(DEFAULT_NB_TRFS) ")\n"
+          "  -S, --share-rate <int>\n"
+          "        MEMCACHED: Percentage of transactions that are targeted at the shared zone (default=" XSTR(QUEUE_SHARED_VALUE) ")\n"
+  			  "  -N, --new-rate <int>\n"
+          "        MEMCACHED: Percentage of set requests (default=" XSTR(WRITE_PERCENT) ")\n"
+  			  "  -l, --num-ways <int>\n"
+          "        MEMCACHED: Number of 'ways' for each hashtable entry entry (default=" XSTR(NUMBER_WAYS) ")\n"
           "  -T, --num-txs-pergputhread <int>\n"
           "        Number of transactions per GPU thread (default=" XSTR(DEFAULT_TransEachThread) ")\n"
           "  -f, --file-name <string>\n"
@@ -131,40 +133,32 @@ void bank_parseArgs(int argc, char **argv, thread_data_t *data)
       case 'a':
         data->nb_accounts = atoi(optarg);
         break;
-  #ifndef TM_COMPILER
-      case 'c':
-        data->cm = optarg;
-        break;
-  #endif /* ! TM_COMPILER */
       case 'd':
         data->duration = atoi(optarg);
         break;
       case 'n':
         data->nb_threads = atoi(optarg);
         break;
-      case 'r':
-        data->read_all = atoi(optarg);
-        break;
-      case 'R':
-        data->read_threads = atoi(optarg);
-        break;
       case 's':
-        data->seed = atoi(optarg);
+        data->hmult = atof(optarg);
         break;
-      case 'w':
-        data->write_all = atoi(optarg);
+      case 'm':
+        data->hprob = atoi(optarg);
         break;
-      case 'W':
-        data->write_threads = atoi(optarg);
-        break;
-      // case 'j':
-      //   data->disjoint = 1;
-      //   break;
       case 'i':
         data->iter = atoi(optarg);
         break;
       case 't':
         data->trfs = atoi(optarg);
+        break;
+      case 'S':
+        data->shared_percent = atoi(optarg);
+        break;
+      case 'N':
+        data->set_percent = atoi(optarg);
+        break;
+      case 'l':
+        data->num_ways = atoi(optarg);
         break;
       case 'T':
         data->trans = atoi(optarg);
@@ -211,11 +205,10 @@ void bank_printStats(thread_data_t *data)
 #endif /* ! TM_COMPILER */
 
   duration = TIMER_DIFF_SECONDS(data->start, data->end) * 1000;
-  duration2 = TIMER_DIFF_SECONDS(data->start, data->final) * 1000;
+  duration2 = TIMER_DIFF_SECONDS(data->start, data->last) * 1000;
   data->duration  = duration;
   data->duration2 = duration2;
 
-  ret = bank_sum(data->bank);
 #if NODEBUG == 0
   for (i = 0; i < data->nb_threadsCPU; i++) {
     /* TODO:
@@ -246,28 +239,58 @@ void bank_printStats(thread_data_t *data)
   }
   data->updates -= global_fix;
   /* Sanity check */
+#ifdef BENCH_BANK
   ret = bank_sum(data->bank);
-  printf("Bank total    : %d (expected: 0)\n", ret);
+  // for (int i = 0; i < data->bank->size; ++i) {
+  //   if (data->bank->accounts[i] != 0)
+  //   printf("[%7i=%9i]", i,  data->bank->accounts[i]);
+  // }
+  // printf("\n");
+  printf("Bank total    : %d (expected: 0)\n", ret); // TODO
+#endif
   printf("Duration      : %f (ms)\n", data->duration);
   printf("#txs          : %lu (%f / s)\n", data->reads + data->writes + data->updates, (data->reads + data->writes + data->updates) * 1000.0 / data->duration2);
-  printf("#read txs     : %lu (%f / s)\n", data->reads, data->reads * 1000.0 / data->duration2);
-  printf("#write txs    : %lu (%f / s)\n", data->writes, data->writes * 1000.0 / data->duration2);
-  printf("#update txs   : %lu (%f / s)\n", data->updates, data->updates * 1000.0 / data->duration2);
-  printf("#aborts       : %lu (%f / s)\n", data->aborts, data->aborts * 1000.0 / data->duration2);
+  printf("#aborts       : %lu (%f / s)\n", aborts, aborts * 1000.0 / data->duration2);
   printf("Duration      : %f (ms)\n", data->duration);
   printf("Real duration : %f (ms)\n", data->duration2);
 #endif
+
+  printf(" Throughput in kernel = %14.2f TXs/s\n", (double)HeTM_stats_data.nbTxsGPU/((double)HeTM_stats_data.timeGPU/1000.0));
+  printf(" THROUGHPUT           = %14.2f\n", data->throughput_gpu);
+  printf("   >>> THROUGHPUT GPU = %14.2f\n", data->throughput_gpu_only);
+  printf("   >>> THROUGHPUT CPU = %14.2f\n", data->throughput);
+  printf("   >>> AFTER BATCH    = %14.2f\n", (double)HeTM_stats_data.txsNonBlocking /
+    (HeTM_stats_data.timeNonBlocking));
+  printf("   >>> TXs NON_BLOCK  = %li\n", HeTM_stats_data.txsNonBlocking);
+  printf("   >>> TXs            = %li\n", HeTM_stats_data.nbTxsCPU);
+  printf(" TOTAL TIME IN BENCHMARK = %14.5fms\n", data->duration2);
+  printf("   > ON BATCH            = %14.5f\n", HeTM_stats_data.timePRSTM*1000);
+  printf("   > ON COMPARING        = %14.5f\n", HeTM_stats_data.timeCMP*1000);
+  printf("   > AFTER CMP           = %14.5f\n", HeTM_stats_data.timeAfterCMP*1000);
+  printf("   > BLOCKING            = %14.5f\n", HeTM_stats_data.timeBlocking*1000);
+  printf("   > NON-BLOCKING        = %14.5f\n", HeTM_stats_data.timeNonBlocking*1000);
+  printf("   > COPING THE WSET     = %14.5f\n", HeTM_stats_data.totalTimeCpyWSet);
+  printf("   > COPING THE DATASET  = %14.5f\n", HeTM_stats_data.totalTimeCpyDataset);
+  printf("   > CMP (GPU time)      = %14.5f\n", HeTM_stats_data.totalTimeCmp);
+  printf(" DATA TRANSFERED (B)\n");
+  printf("   > LOGS (VERS, ADDR) = %zuB\n", HeTM_stats_data.sizeCpyLogs);
+  printf("   > WSet (ADDR, BMAP) = %zuB\n", HeTM_stats_data.sizeCpyWSet);
+  printf("   > Dataset           = %zuB\n", HeTM_stats_data.sizeCpyDataset);
 }
 
 void bank_statsFile(thread_data_t *data)
 {
   DEBUG_PRINT("Sorting info.\n");
 
+  // TODO: refactor this to be the same as the remaining statistics
+  double kernelThroughput = (double)HeTM_stats_data.nbTxsGPU /
+    (HeTM_stats_data.timeGPU / 1000.0);
+
   /*Sort Arrays*/
-  qsort(data->tot_duration,  data->iter,sizeof(int),compare_int);
-  qsort(data->tot_duration2, data->iter,sizeof(int),compare_int);
-  qsort(data->tot_commits,   data->iter,sizeof(int),compare_int);
-  qsort(data->tot_aborts,    data->iter,sizeof(int),compare_int);
+  qsort(data->tot_duration,       data->iter,sizeof(int),compare_int);
+  qsort(data->tot_duration2,      data->iter,sizeof(int),compare_int);
+  qsort(data->tot_commits,        data->iter,sizeof(int),compare_int);
+  qsort(data->tot_aborts,         data->iter,sizeof(int),compare_int);
   qsort(data->tot_commits_gpu,    data->iter,sizeof(int),compare_int);
   qsort(data->tot_throughput,     data->iter,sizeof(double),compare_double);
   qsort(data->tot_throughput_gpu, data->iter,sizeof(double),compare_double);
@@ -292,64 +315,91 @@ void bank_statsFile(thread_data_t *data)
     if(ftell(f)==0) {	//New File, print headers
     	fprintf(f, "sep=;\n");
     	fprintf(f,
-        "Nb Accounts(1);"
-      	"Exp Duration(2);"
-      	"Real Duration(3);"
-      	"CPU Commits(4);"
-      	"GPU Commits(5);"
-      	"CPU Aborts(6);"
-        "GPU Aborts(7);"
-      	"CPU Throughput(8);"
-      	"HeTM Throughput(9);"
-      	"Total Lock Time(10);"
-      	"Total Comp Time(11);"
-      	"Transf CPU(12);"
-      	"Transf GPU(13);"
-      	"Transf Cmp(14);"
-      	"Tx Time(15);"
-      	"Nb GPU runs(16);"
-      	"Nb success(17);"
-      	"Accts per TX(18);"
-      	"Batch Size(19);"
-      	"Sync Balancing(20);"
-      	"CPU_PART(21);"
-      	"GPU_PART(22);"
-      	"P_INTERSECT(23);"
-      	"GPU_BLOCKS(24);"
-      	"GPU_THREADS(25);"
-      	"GPU-only Throughput(26);"
-      	"CPU_THREADS(27)"
+        "NB_ACCOUNTS(1);"
+        "CPU_THREADS(2);"
+        "GPU_BLOCKS(3);"
+        "GPU_THREADS_PER_BLOCK(4);"
+        "TXs_PER_GPU_THREAD(5);"
+        "CPU_PART(6);"
+        "GPU_PART(7);"
+        "P_INTERSECT(8);"
+      	"DURATION(9);"
+      	"REAL_DURATION(10);"
+      	"NB_CPU_COMMITS(11);"
+      	"NB_GPU_COMMITS(12);"
+      	"NB_CPU_ABORTS(13);"
+        "NB_GPU_ABORTS(14);"
+      	"CPU_THROUGHPUT(15);"
+        "GPU_THROUGHPUT(16);"
+        "Kernel_THROUGHPUT(17);"
+      	"HeTM_THROUGHPUT(18);"
+        "NB_BATCHES(19);"
+        "NB_SUCCESS(20);"
+      	"TIME_IN_KERNEL(21);"
+        "TIME_BATCH(22);"
+        "TIME_AFTER_BATCH(23);"
+        "TIME_AFTER_CMP(24);"
+      	"TIME_CPY_WSET(25);"
+      	"TIME_CMP(26);"
+      	"TIME_CPY_DATASET(27);"
+      	"THROUGHPUT_BETWEEN_BATCHES(28);"
+      	"CPU_TXs_BETWEEN_BATCHES(29);"
+      	"TIME_NON_BLOCKING(30);"
+      	"TIME_BLOCKING(31);"
+        "SIZE_CPY_LOGS(32);"
+        "SIZE_CPY_WSET(33);"
+        "SIZE_CPY_DATASET(34);"
+        "PROB_HOTSPOT(35);"
+        "SIZE_HOTSPOT(36)"
         "\n"
       );
     }
 
-    fprintf(f, "%i;" , data->nb_accounts                     ); // Nb Accounts(1)
-    fprintf(f, "%f;" , data->tot_duration[data->iter/2]      ); // Exp Duration(2)
-    fprintf(f, "%f;" , data->tot_duration2[data->iter/2]     ); // Real Duration(3)
-    fprintf(f, "%lu;", data->tot_commits[data->iter/2]       ); // CPU Commits(4)
-    fprintf(f, "%lu;", data->tot_commits_gpu[data->iter/2]   ); // GPU Commits(5)
-    fprintf(f, "%li;", data->tot_aborts[data->iter/2]        ); // CPU Aborts(6)
-    fprintf(f, "%lu;", data->tot_aborts_gpu[data->iter/2]    ); // GPU Aborts(7)
-    fprintf(f, "%f;" , data->tot_throughput[data->iter/2]    ); // CPU Throughput(8)
-    fprintf(f, "%f;" , data->tot_throughput_gpu[data->iter/2]); // GPU Throughput(9)
-    fprintf(f, "%li;", data->tot_cuda[data->iter/2]          ); // Total Lock Time(10)
-    fprintf(f, "%li;", data->tot_comp[data->iter/2]          ); // Total Comp Time(11)
-    fprintf(f, "%li;", data->tot_trf2cpu[data->iter/2]       ); // Transf CPU(12)
-    fprintf(f, "%li;", data->tot_trf2gpu[data->iter/2]       ); // Transf GPU(13)
-    fprintf(f, "%li;", data->tot_trfcmp[data->iter/2]        ); // Transf Cmp(14)
-    fprintf(f, "%li;", data->tot_tx[data->iter/2]            ); // Tx Time(15)
-    fprintf(f, "%li;", data->tot_loop[data->iter/2]          ); // Nb GPU runs(16)
-    fprintf(f, "%li;", data->tot_loops[data->iter/2]         ); // Nb success(17)
-    fprintf(f, "%d;" , data->trfs                            ); // Accts per TX(18)
-    fprintf(f, "%d;" , data->trans                           ); // Batch Size(19)
-    fprintf(f, "%d;" , SYNC_BALANCING_VALF                   ); // Sync Balancing(20)
-    fprintf(f, "%f;" , CPU_PART                              ); // CPU_PART(21)
-    fprintf(f, "%f;" , GPU_PART                              ); // GPU_PART(22)
-    fprintf(f, "%f;" , P_INTERSECT                           ); // P_INTERSECT(23)
-    fprintf(f, "%i;" , data->GPUblockNum                     ); // GPU_BLOCKS(24)
-    fprintf(f, "%i;" , data->GPUthreadNum                    ); // GPU_THREADS(25)
-    fprintf(f, "%f;" , data->tot_throughput_gpu_only[data->iter/2]); // GPUonly Throughput(26)
-    fprintf(f, "%i\n", data->nb_threadsCPU                    ); // CPU_THREADS(27)
+    double throughputBetweenBatches = (double)HeTM_stats_data.txsNonBlocking /
+      (HeTM_stats_data.timeBlocking+HeTM_stats_data.timeNonBlocking);
+
+    if (HeTM_stats_data.timeBlocking+HeTM_stats_data.timeNonBlocking == 0) {
+      throughputBetweenBatches = 0;
+    }
+
+    // TODO: REFACTOR NAMES OF VARIABLES!!!
+    fprintf(f, "%i;" , data->nb_accounts                     ); // NB_ACCOUNTS(1)
+    fprintf(f, "%i;" , data->nb_threadsCPU                   ); // CPU_THREADS(2)
+    fprintf(f, "%i;" , data->GPUblockNum                     ); // GPU_BLOCKS(3)
+    fprintf(f, "%i;" , data->GPUthreadNum                    ); // GPU_THREADS_PER_BLOCK(4)
+    fprintf(f, "%d;" , data->trans                           ); // TXs_PER_GPU_THREAD(5)
+    fprintf(f, "%f;" , CPU_PART                              ); // CPU_PART(6)
+    fprintf(f, "%f;" , GPU_PART                              ); // GPU_PART(7)
+    fprintf(f, "%f;" , P_INTERSECT                           ); // P_INTERSECT(8)
+    fprintf(f, "%f;" , data->tot_duration[data->iter/2]      ); // DURATION(9)
+    fprintf(f, "%f;" , data->tot_duration2[data->iter/2]     ); // REAL_DURATION(10)
+    fprintf(f, "%lu;", data->tot_commits[data->iter/2]       ); // NB_CPU_COMMITS(11)
+    fprintf(f, "%lu;", data->tot_commits_gpu[data->iter/2]   ); // NB_GPU_COMMITS(12)
+    fprintf(f, "%li;", data->tot_aborts[data->iter/2]        ); // NB_CPU_ABORTS(13)
+    fprintf(f, "%lu;", data->tot_aborts_gpu[data->iter/2]    ); // NB_GPU_ABORTS(14)
+    fprintf(f, "%f;" , data->tot_throughput[data->iter/2]    ); // CPU_THROUGHPUT(15)
+    fprintf(f, "%f;" , data->tot_throughput_gpu_only[data->iter/2]); //  GPU_THROUGHPUT(16)
+    fprintf(f, "%f;" , kernelThroughput                      ); // Kernel_THROUGHPUT(17)
+    fprintf(f, "%f;" , data->tot_throughput_gpu[data->iter/2]); // HeTM_THROUGHPUT(18)
+    fprintf(f, "%li;", data->tot_loop[data->iter/2]          ); // NB_BATCHES(19)
+    fprintf(f, "%li;", data->tot_loops[data->iter/2]         ); // NB_SUCCESS(20)
+    fprintf(f, "%f;" , HeTM_stats_data.timeGPU/1000.0        ); // TIME_IN_KERNEL(21)
+    fprintf(f, "%f;" , HeTM_stats_data.timePRSTM             ); // TIME_BATCH(22)
+    fprintf(f, "%f;" , HeTM_stats_data.timeCMP               ); // TIME_AFTER_BATCH(23)
+    fprintf(f, "%f;" , HeTM_stats_data.timeAfterCMP          ); // TIME_AFTER_CMP(24)
+    fprintf(f, "%f;" , HeTM_stats_data.totalTimeCpyWSet/1000.0); // TIME_CPY_WSET(25)
+    fprintf(f, "%f;" , HeTM_stats_data.totalTimeCmp/1000.0   ); // TIME_CMP(26)
+    fprintf(f, "%f;" , HeTM_stats_data.totalTimeCpyDataset/1000.0); // TIME_CPY_DATASET(27)
+    fprintf(f, "%f;" , throughputBetweenBatches              ); // THROUGHPUT_BETWEEN_BATCHES(28)
+    fprintf(f, "%li;", HeTM_stats_data.txsNonBlocking        ); // CPU_TXs_BETWEEN_BATCHES(29)
+    fprintf(f, "%f;" , HeTM_stats_data.timeNonBlocking       ); // TIME_NON_BLOCKING(30)
+    fprintf(f, "%f;" , HeTM_stats_data.timeBlocking          ); // TIME_BLOCKING(31)
+    fprintf(f, "%zu;", HeTM_stats_data.sizeCpyLogs           ); // SIZE_CPY_LOGS(32)
+    fprintf(f, "%zu;", HeTM_stats_data.sizeCpyWSet           ); // SIZE_CPY_WSET(33)
+    fprintf(f, "%zu;", HeTM_stats_data.sizeCpyDataset        ); // SIZE_CPY_DATASET(34)
+    fprintf(f, "%i;" , data->hprob                           ); // PROB_HOTSPOT(35)
+    fprintf(f, "%f"  , data->hmult                           ); // SIZE_HOTSPOT(36)
+    fprintf(f, "\n");
     fclose(f);
 }
 
@@ -360,15 +410,13 @@ void bank_between_iter(thread_data_t *data, int j)
 
   // TODO[Ricardo]: explain all arrays!
 	/* Save info between iterations*/
-  data->throughput            = (data->reads + data->writes + data->updates) * 1000.0 / data->duration2;
+  // data->reads + data->writes + data->updates // TODO: CPU_INV changes these values
+  data->throughput            = (HeTM_stats_data.nbTxsCPU) * 1000.0 / data->duration2;
   // thread data->nb_threadsCPU is the GPU controller thread
-  data->throughput_gpu        = (data->reads + data->writes + data->updates + data->dthreads[data->nb_threadsCPU].nb_transfer) * 1000.0 / data->duration2;
-  data->throughput_gpu_only   = (data->dthreads[data->nb_threadsCPU].nb_transfer_gpu_only) * 1000.0 / data->duration2;
+  data->throughput_gpu        = (HeTM_stats_data.nbCommittedTxsCPU + HeTM_stats_data.nbCommittedTxsGPU) * 1000.0 / data->duration2;
+  data->throughput_gpu_only   = (HeTM_stats_data.nbCommittedTxsGPU) * 1000.0 / data->duration2;
   data->tot_commits_gpu[j]    = data->dthreads[data->nb_threadsCPU].nb_transfer;
   data->tot_throughput_gpu[j] = data->throughput_gpu;
-  printf("data->throughput_HeTM=%f\n", data->throughput_gpu);
-  printf("data->throughput_gpu =%f\n", data->throughput_gpu_only);
-  printf("data->throughput_cpu =%f\n", data->throughput);
   data->tot_aborts_gpu[j]     = data->dthreads[data->nb_threadsCPU].nb_aborts;
   data->tot_comp[j]           = data->dthreads[data->nb_threadsCPU].nb_aborts_2;
   data->tot_tx[j]             = data->dthreads[data->nb_threadsCPU].max_retries;
@@ -385,6 +433,11 @@ void bank_between_iter(thread_data_t *data, int j)
   data->tot_throughput_gpu_only[j] = data->throughput_gpu_only;
   for (int i = 0; i < data->nb_threadsCPU; ++i) {
     data->tot_aborts[j]      += data->dthreads[i].nb_aborts;
+  }
+
+  if (data->nb_threadsCPU != 0) {
+    HeTM_stats_data.timeBlocking /= data->nb_threadsCPU;
+    HeTM_stats_data.timeNonBlocking /= data->nb_threadsCPU;
   }
 }
 

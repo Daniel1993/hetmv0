@@ -1,5 +1,9 @@
+### TODO: create include files for pr-stm, cuda-utils, tsx and tiny
+
 CURR_DIR      ?= ~/projs/HeTM_V0/bank
 TINY_ROOT     ?= $(CURR_DIR)/../tinyMOD
+TSX_ROOT      ?= $(CURR_DIR)/../tsxMOD
+HETM_ROOT     ?= $(CURR_DIR)/../hetm
 HTM_SGL       ?= ~/projs/htm_alg
 PR_STM_DIR    ?= ~/projs/pr-stm
 CUDA_PATH     ?= /usr/local/cuda
@@ -8,19 +12,21 @@ CUDA_UTIL_DIR ?= ~/projs/cuda-utils
 HTM_ARCH_DEPS ?= ~/projs/arch_dep
 
 CFG           ?= prod
-include $(TINY_ROOT)/Makefile.common
 
 INCLUDES := -I $(CUDA_UTIL_DIR)/include \
 	-I $(PR_STM_DIR)/include \
 	-I $(CUDA_PATH)/include \
 	-I $(CURR_DIR)/include \
 	-I $(TINY_ROOT)/include \
+	-I $(TSX_ROOT)/include \
+	-I $(HETM_ROOT)/include \
 	-I $(TINY_ROOT)/src
 #
 DEFINES  :=
 #
 LIBS     := -L $(CUDA_PATH)/lib64 -lcudart -lcuda \
 	-L $(TINY_ROOT)/lib -lstm -lpthread \
+	-L $(HETM_ROOT) -lhetm \
 	-L $(CUDA_UTIL_DIR) -lcuda-util
 #
 APP  = bank
@@ -38,20 +44,20 @@ DEFINES    += -DTM_STATISTICS3
 DEBUG_FLAGS  := -g -lineinfo -DHETM_DEB=1
 NV_DEB_FLAGS := -G -g -lineinfo -DHETM_DEB=1
 
+INCLUDES  += 	-I $(HTM_ARCH_DEPS)/include
 ifeq ($(USE_TSX_IMPL),1)
-INCLUDES  += 	-I $(HTM_ARCH_DEPS)/include \
-	-I $(HTM_SGL)/include
-LIBS      += -L $(HTM_SGL)/bin -lhtm_sgl
+INCLUDES  += -I $(HTM_SGL)/include
+LIBS      += -L $(HTM_SGL)/bin -lhtm_sgl -L $(TSX_ROOT) -ltsxMOD
 endif
 
-CFLAGS     := -c $(DEFINES) $(INCLUDES)
+CFLAGS     := -c $(DEFINES) $(INCLUDES) -std=c99
 CXXFLAGS   := -c $(DEFINES) $(INCLUDES) -std=c++11
 NVFLAGS    := -c $(DEFINES) $(INCLUDES) -std=c++11 \
 	--default-stream per-thread \
-	-arch sm_30
+	-arch sm_50
 LDFLAGS    := $(LIBS) \
 --default-stream per-thread \
--arch sm_30
+-arch sm_50
 
 ifeq ($(USE_TSX_IMPL),1)
 TSX_FLAGS += -DUSE_TSX_IMPL
@@ -71,19 +77,15 @@ BANK_OBJS  := \
 	$(SRC)/bank.o \
 	$(SRC)/bankKernel.o \
 	$(SRC)/cmp_kernels.o \
-	$(SRC)/tsx_impl.o \
 	$(SRC)/shared.o \
 	$(SRC)/setupKernels.o \
-	$(SRC)/hetm.o \
 	$(SRC)/kernel.o
 
 MEMCD_OBJS  := \
 	$(SRC)/memcd.o \
 	$(SRC)/bankKernel.o \
 	$(SRC)/cmp_kernels.o \
-	$(SRC)/tsx_impl.o \
 	$(SRC)/shared.o \
-	$(SRC)/hetm.o \
 	$(SRC)/setupKernels.o \
 	$(SRC)/tx_queue.o \
 	$(SRC)/memcdKernel.o \
@@ -101,7 +103,51 @@ endif
 all: $(APP)
 	# bank bank.o tsx_impl.o kernel.o pr-stm.o cmp_kernels.o shared.o thread.o
 
+# TODO: propagate PR_MAX_RWSET_SIZE and HETM_CMP_TYPE
 $(APP): $(OBJS)
+	@echo " ============================================ "
+	@echo " === Building HeTM lib "
+	@echo " ============================================ "
+	$(MAKE) --directory $(HETM_ROOT) clean
+	$(MAKE) -j14 --directory $(HETM_ROOT) \
+		USE_TSX_IMPL=$(USE_TSX_IMPL) \
+		CMP_TYPE=$(CMP_TYPE) \
+		LOG_TYPE=$(LOG_TYPE) \
+		PR_MAX_RWSET_SIZE=$(PR_MAX_RWSET_SIZE) \
+		CFG=$(CFG) \
+		PROFILE=$(PROFILE) \
+		INST_CPU=$(INST_CPU) \
+		HETM_DISABLE_CHUNKS=$(DHETM_DISABLE_CHUNKS) \
+		PRINT_DEB=$(PRINT_DEB)
+	@echo " ============================================ "
+	@echo " === Building TinyMOD lib "
+	@echo " ============================================ "
+	$(MAKE) --directory $(TINY_ROOT) clean
+	$(MAKE) -j14 --directory $(TINY_ROOT) \
+		USE_TSX_IMPL=$(USE_TSX_IMPL) \
+		CMP_TYPE=$(CMP_TYPE) \
+		LOG_TYPE=$(LOG_TYPE) \
+		PR_MAX_RWSET_SIZE=$(PR_MAX_RWSET_SIZE) \
+		CFG=$(CFG) \
+		HETM_DISABLE_CHUNKS=$(DHETM_DISABLE_CHUNKS) \
+		INST_CPU=$(INST_CPU) \
+		PRINT_DEB=$(PRINT_DEB)
+	@echo " ============================================ "
+	@echo " === Building TSXMOD lib "
+	@echo " ============================================ "
+	$(MAKE) --directory $(TSX_ROOT) clean
+	$(MAKE) -j14 --directory $(TSX_ROOT) \
+		USE_TSX_IMPL=$(USE_TSX_IMPL) \
+		CMP_TYPE=$(CMP_TYPE) \
+		LOG_TYPE=$(LOG_TYPE) \
+		PR_MAX_RWSET_SIZE=$(PR_MAX_RWSET_SIZE) \
+		CFG=$(CFG) \
+		INST_CPU=$(INST_CPU) \
+		HETM_DISABLE_CHUNKS=$(DHETM_DISABLE_CHUNKS) \
+		PRINT_DEB=$(PRINT_DEB)
+	@echo " ============================================ "
+	@echo "Linking..."
+	$(CC) $(CXXFLAGS) -O2 -o $(SRC)/bank.o $(SRC)/bank.cpp
 	$(NVCC) $(LDFLAGS) -o $@ $(OBJS)
 
 %.o:	%.c

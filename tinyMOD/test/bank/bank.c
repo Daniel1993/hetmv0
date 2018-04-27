@@ -41,9 +41,9 @@
 #define RO                              1
 #define RW                              0
 
-#if defined(TM_GCC) 
+#if defined(TM_GCC)
 # include "../../abi/gcc/tm_macros.h"
-#elif defined(TM_DTMC) 
+#elif defined(TM_DTMC)
 # include "../../abi/dtmc/tm_macros.h"
 #elif defined(TM_INTEL)
 # include "../../abi/intel/tm_macros.h"
@@ -54,9 +54,9 @@
 #if defined(TM_GCC) || defined(TM_DTMC) || defined(TM_INTEL) || defined(TM_ABI)
 # define TM_COMPILER
 /* Add some attributes to library function */
-TM_PURE 
+TM_PURE
 void exit(int status);
-TM_PURE 
+TM_PURE
 void perror(const char *s);
 #else /* Compile with explicit calls to tinySTM */
 
@@ -308,11 +308,9 @@ static void *test(void *data)
   stm_get_stats("locked_reads_ok", &d->locked_reads_ok);
   stm_get_stats("locked_reads_failed", &d->locked_reads_failed);
   stm_get_stats("max_retries", &d->max_retries);
-  
+
   //log_test
   int * p; int c, i;
-  i = stm_get_stats("HeTM_CPULog", &p);
-  printf("Accessed log with success, %d entries\n", i);
   //for(c = 0; c<i; c+=4) printf("%d - %d - %d - %d\n", p[c], p[c+1], p[c+2], p[c+3]);
 #endif /* ! TM_COMPILER */
   /* Free transaction */
@@ -574,7 +572,7 @@ int main(int argc, char **argv)
     perror("signal");
     exit(1);
   }
- 
+
   /* Start threads */
   barrier_cross(&barrier);
 
@@ -683,7 +681,7 @@ int main(int argc, char **argv)
     printf("  #samples    : %lu\n", ab_stats.samples);
     printf("  Mean        : %f\n", ab_stats.mean);
     printf("  Variance    : %f\n", ab_stats.variance);
-    printf("  Min         : %f\n", ab_stats.min); 
+    printf("  Min         : %f\n", ab_stats.min);
     printf("  Max         : %f\n", ab_stats.max);
     printf("  50th perc.  : %f\n", ab_stats.percentile_50);
     printf("  90th perc.  : %f\n", ab_stats.percentile_90);
@@ -692,8 +690,8 @@ int main(int argc, char **argv)
 #endif /* ! TM_COMPILER */
 
   /*Save to file*/
-  
-  
+
+
   /* Delete bank and accounts */
   free(bank->accounts);
   free(bank);

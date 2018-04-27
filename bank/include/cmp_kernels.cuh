@@ -6,7 +6,7 @@
 #include "cuda_runtime.h"
 #include "device_launch_parameters.h"
 #include "pr-stm-wrapper.cuh"
-#include "log.h"
+#include "hetm-log.h"
 #include "cuda_defines.h"
 
 #include <cuda_profiler_api.h>
@@ -19,6 +19,8 @@
 #include "helper_timer.h"
 #include <time.h>
 #include "bitmap.h"
+
+#include "hetm-cmp-kernels.cuh"
 
 //Support for the host log comparison
 #define checkThreadMult   2   // Number of warps in each comparison kernel block
@@ -33,11 +35,6 @@
 // b==numBlocks t==numThreads
 #define EXPLICIT_LOG_SIZE(b,t) (b * t * EXPLICIT_LOG_BLOCK)	//size of the lazy lock
 
-#define CMP_EXPLICIT_THRS_PER_RSET 1024 /* divide per CMP_EXPLICIT_THRS_PER_WSET */
-#define CMP_EXPLICIT_THRS_PER_WSET 32 /* nb. of entries to compare */
-
-__constant__ __device__ long dev_basePoint; // TODO: check how global variables are linked in CUDA
-
 /****************************************************************************
  *	KERNELS
  ****************************************************************************/
@@ -51,63 +48,13 @@ __constant__ __device__ long dev_basePoint; // TODO: check how global variables 
  *
  ****************************************/
 typedef struct HeTM_knl_checkTx_ {
-	 int *dev_flag; /*Flag in global memory*/
-	 int *stm_log;  /*Host log*/
-	 int size_stm;  /*Size of the host log*/
-	 int *devLogR;  /*GPU read log */
+	int *dev_flag;
+	int *stm_log;  /*Host log*/
+	int size_stm;  /*Size of the host log*/
+	int *devLogR;  /*GPU read log */
 } HeTM_knl_checkTx_s;
 
 __global__ void HeTM_knl_checkTx(HeTM_knl_checkTx_s);
-
-/****************************************
- *	HeTM_knl_checkTxCompressed()
- *
- *	Description: Compare device write-log with host log, when using compressed log
- *
- ****************************************/
-typedef struct HeTM_knl_checkTxCompressed_ {
-	int * dev_flag;       /* Flag in global memory */
-	HeTM_CPULogEntry * stm_log; /* Host log */
-	int size_stm;         /* Size of the host log */
-	int size_log;         /* Size of the device log */
-	int * mutex;          /* Lock array */
-	int * devLogR;        /* GPU read log */
-	account_t *a;         /* Values array */
-	account_t *b;         /* Host values array */
-	long * vers;          /* Version */
-} HeTM_knl_checkTxCompressed_s;
-
-typedef struct HeTM_checkTxCompressed_ {
-	HeTM_knl_checkTxCompressed_s knlArgs;
-	stream_t *clbkArgs;
-} HeTM_checkTxCompressed_s;
-
-__global__ void HeTM_knl_checkTxCompressed(HeTM_knl_checkTxCompressed_s);
-
-/****************************************
- *	HeTM_knl_checkTxExplicit()
- *
- *	Description: Compare device write-log with host log, when using compressed log
- *
- ****************************************/
-typedef struct HeTM_knl_checkTxExplicit_ {
-	int *dev_flag;       /* Flag in global memory */
-	HeTM_CPULogEntry *stm_log; /* Host log */
-	int size_stm;        /* Size of the host log */
-	int size_logR;       /* Size of the host log */
-	int *devLogR;        /* GPU read log */
-	int *mutex;
-  account_t *a;        /* Values array */
-  account_t *b;        /* Values array */
-  long *vers;          /* Version */
-} HeTM_knl_checkTxExplicit_s;
-
-typedef struct HeTM_checkTxExplicit_ {
-	HeTM_knl_checkTxExplicit_s knlArgs;
-	stream_t *clbkArgs;
-} HeTM_checkTxExplicit_s;
-
-__global__ void HeTM_knl_checkTxExplicit(HeTM_knl_checkTxExplicit_s);
 
 // called after stream
 void CUDART_CB checkCallback(cudaStream_t event, cudaError_t status, void *data);
@@ -160,28 +107,8 @@ typedef struct HeTM_knl_finalTxLog2_ {
 
 __global__ void HeTM_knl_finalTxLog2(HeTM_knl_finalTxLog2_s);
 
-/****************************************
- *	HeTM_knl_checkTx3()
- *
- *	Description: Compare device write-log with host log.
- *
- ****************************************/
-typedef struct HeTM_knl_checkTx3_ {
-  int * dev_flag;           /* Flag in global memory */
-	HeTM_CPULogEntry * stm_log;     /* Host log */
-	int size;                 /* Size of the working set */
-	int size_stm;             /* Size of the host log */
-	void **devLogR;           /* GPU read log */
-} HeTM_knl_checkTx3_s;
-
-// checkTransactionKernel3
-__global__ void HeTM_knl_checkTx3(HeTM_knl_checkTx3_s);
-
 /****************************************************************************
  *	FUNCTIONS
  ****************************************************************************/
-
-extern "C"
-cudaError_t copyPointer(long);
 
 #endif

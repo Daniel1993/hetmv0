@@ -12,15 +12,23 @@
 #define BANK_NB_TRANSFERS         2       // transfer money between 1 accounts
 #endif
 
-#ifndef DEFAULT_TransEachThread
-#define DEFAULT_TransEachThread   50      // how many transactions each thread do
+#ifndef MEMCD_NB_TRANSFERS
+#define MEMCD_NB_TRANSFERS        16       // TODO
 #endif
 
+#ifndef DEFAULT_TransEachThread
+#ifdef BENCH_BANK
+#define DEFAULT_TransEachThread   50      // how many transactions each thread do
+#else /* BENCH_MEMCD */
+#define DEFAULT_TransEachThread   1       // how many transactions each thread do
+#endif /* BENCH */
+#endif /* DEFAULT_TransEachThread */
+
 // MEMCACHED ------------------
-#define NUMBER_WAYS               16
-#define WRITE_PERCENT             1       // 0-100 percentage of write requests (memcached GET)
-#define QUEUE_SIZE                1024*1024
-#define QUEUE_SHARED_VALUE        5
+#define NUMBER_WAYS               8
+#define WRITE_PERCENT             1     // 0-100 percentage of write requests (memcached GET)
+#define QUEUE_SIZE                128*128//1024*1024
+#define QUEUE_SHARED_VALUE        1
 // ----------------------------
 
 // Support for the compressed log implementation

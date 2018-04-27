@@ -1,35 +1,13 @@
 #ifndef BANK_AUX_H_
 #define BANK_AUX_H_
 
+#include "bitmap.h"
+
 // TODO: refactor this code else where
 /* ################################################################### *
  * GPU ENABLE
  * ################################################################### */
 // LOCK --> usa a cuda_barrier para não premitir avançar para o próximo batch (depois da cmp)
-
-#define TEST_GPU_IN_LOOP_STREAM_CHECK_DONE \
-	if (s->isCmpDone == 1) { \
-		s->status = READ; \
-		if (s->isCudaError) { \
-			HeTM_set_is_interconflict(-1); \
-		} else { \
-			HeTM_set_is_interconflict(jobWithCuda_checkStreamFinal(d->cd, s, count)); \
-		} \
-		if (s->isCudaError) { \
-			HeTM_set_is_interconflict(-1); \
-		} \
-		if (HeTM_is_interconflict() || s->count == NB_CMP_RETRIES) { \
-			s->isThreshold = 1; \
-		} \
-	} \
-//
-
-#define TEST_GPU_IN_LOOP \
-	if (HeTM_get_GPU_status() == HETM_BATCH_DONE) { \
-		jobWithCuda_threadCheck(d->cd, s); \
-		TEST_GPU_IN_LOOP_STREAM_CHECK_DONE; \
-	} \
-//
 
 #ifdef USE_TSX_IMPL
   #define BANK_GET_STATS_TSX(d) \
@@ -46,7 +24,6 @@
     stm_get_stats("nb_aborts", &d->nb_aborts); \
     stm_get_stats("nb_aborts_1", &d->nb_aborts_1); \
     stm_get_stats("nb_aborts_2", &d->nb_aborts_2); \
-		printf("aborts=%lu\n", d->nb_aborts); \
     stm_get_stats("nb_aborts_locked_read", &d->nb_aborts_locked_read); \
     stm_get_stats("nb_aborts_locked_write", &d->nb_aborts_locked_write); \
     stm_get_stats("nb_aborts_validate_read", &d->nb_aborts_validate_read); \
@@ -61,15 +38,10 @@
 #elif !defined(TM_COMPILER) && defined(USE_TSX_IMPL)
 #define BANK_GET_STATS(d) \
 	BANK_GET_STATS_TSX(d); \
-	printf("aborts=%lu\n", d->nb_aborts); \
 //
 #else
   #define BANK_GET_STATS(d) /* empty */
 #endif /* ! TM_COMPILER */
-
-#define BANK_TEARDOWN_TX() \
-  jobWithCuda_exitStream(s); \
-//
 
 //   Memory access layout
 // +------------+--------------------+
@@ -80,38 +52,57 @@
 // +------------------+--------------+
 //
 
-#define BANK_PREPARE_TRANSFER(id, total, account_vec, nb_accounts) ({ \
+// BANK_PART == 1 does partitioned accesses
+#if BANK_PART == 1
+
+// distRnd is not used here
+#define BANK_PREPARE_TRANSFER(id, seed, distRnd, HMult, total, account_vec, nb_accounts) ({ \
   int i; \
   for (i = 0; i < d->trfs; i += 2) { \
-    int is_intersect = IS_INTERSECT_HIT( erand48(seed)*100000.0 ); \
+    int is_intersect = IS_INTERSECT_HIT( RAND_R_FNC(seed) ); \
 		if (!is_intersect) { \
-			src = CPU_ACCESS(erand48(seed)*nb_accounts, nb_accounts); \
-			dst = CPU_ACCESS(erand48(seed)*nb_accounts, nb_accounts); \
+			src = CPU_ACCESS(RAND_R_FNC(seed)%(nb_accounts - 1), nb_accounts - 2) + 1; \
 		} else { \
-			src = INTERSECT_ACCESS(erand48(seed)*nb_accounts, nb_accounts); \
-			dst = INTERSECT_ACCESS(erand48(seed)*nb_accounts, nb_accounts); \
+			src = INTERSECT_ACCESS_CPU(RAND_R_FNC(seed)%(nb_accounts - 1), nb_accounts - 2) + 1; \
 		} \
-    if (dst == src) \
-      dst = (src + 1) % nb_accounts; /* TODO: check this */ \
+    dst = (src + 1) % nb_accounts; \
     accounts_vec[i]   = src; \
     accounts_vec[i+1] = dst; \
   } \
 }) \
 //
+#elif BANK_PART == 2 /* using hotspots */
 
-#define BANK_CMP_KERNEL_NO_LOCK   HeTM_set_GPU_status(HETM_BATCH_DONE)
-#define BANK_CMP_KERNEL_BM_TRANSF jobWithCuda_bm(*cd, valid_vec)
-
-// primeira barreira sinaliza comparação
-// segunda barreira espera finalização da comparação
-
-#define BANK_CMP_KERNEL() \
-	TIMER_T timerStream; \
-	DEBUG_PRINT("Starting comparisson kernel!\n"); \
-	BANK_CMP_KERNEL_NO_LOCK; /* TODO[Ricardo]: barrier_wait if !NO_LOCK */\
-	HeTM_GPU_wait(); /*barrier_cross(*d->cuda_barrier);*/ \
-  TIMER_READ(timerStream); \
-  duration_cmp += TIMER_DIFF_SECONDS(cmp_start, timerStream) * 1000; \
+#define BANK_PREPARE_TRANSFER(id, seed, distRnd, HMult, total, account_vec, nb_accounts) ({ \
+  int i; \
+  for (i = 0; i < d->trfs; i += 2) { \
+    int is_hot = IS_ACCESS_H( RAND_R_FNC(seed), distRnd ); \
+    if (!is_hot) { \
+      src = CPU_ACCESS_H(RAND_R_FNC(seed), HMult, nb_accounts - 2) + 1; \
+    } else { \
+      src = CPU_ACCESS_M(RAND_R_FNC(seed), 3*HMult, nb_accounts - 2) + 1; \
+    } \
+    dst = (src + 1) % nb_accounts; \
+    accounts_vec[i]   = src; \
+    accounts_vec[i+1] = dst; \
+  } \
+}) \
 //
+#else /* BANK_PART != 1||2 */
+
+// use distRnd
+#define BANK_PREPARE_TRANSFER(id, seed, distRnd, HMult, total, account_vec, nb_accounts) ({ \
+  int i; \
+  for (i = 0; i < d->trfs; i += 2) { \
+    distRnd = distRnd % (CPU_TOP_IDX(nb_accounts) - CPU_BOT_IDX(nb_accounts)); \
+    distRnd = (CPU_TOP_IDX(nb_accounts) - 1) - distRnd; \
+		src = distRnd; /*INTERSECT_ACCESS_CPU(RAND_R_FNC(seed)%(nb_accounts-1), nb_accounts-1);*/ \
+    dst = (src + 1) % nb_accounts; \
+    accounts_vec[i]   = src; \
+    accounts_vec[i+1] = dst; \
+  } \
+}) \
+//
+#endif /* BANK_PART == 1 */
 
 #endif /* BANK_AUX_H_ */

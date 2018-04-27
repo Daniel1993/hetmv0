@@ -26,9 +26,6 @@ extern "C" {
 //#define	DEBUG_CUDA
 //#define	DEBUG_CUDA2
 
-#define ARCH             FERMI
-#define DEVICE_ID        0
-
 //Support for the lazylog implementation
 // moved to cmp_kernels.cuh
 // #define EXPLICIT_LOG_BLOCK     (TransEachThread * BANK_NB_TRANSFERS)
@@ -157,10 +154,6 @@ cuda_t * jobWithCuda_init(account_t *accounts, int size, int trans, int hash, in
     memman_alloc_gpu("HeTM_accounts_ts", accountsSize, accounts, 0);
     memman_zero_gpu(NULL);
 
-
-    memman_alloc_dual("Stats_OnIntersect", nbGPUThreads * sizeof(int), 0);
-    memman_zero_gpu(NULL);
-
     memman_alloc_dual("HeTM_cpu_versions", nbAccounts * sizeof(long), 0);
     memman_zero_gpu(NULL);
 
@@ -177,10 +170,10 @@ cuda_t * jobWithCuda_init(account_t *accounts, int size, int trans, int hash, in
     CHECK_ERROR_CONTINUE(cudaMalloc((void **)&dev_bm, nbAccounts * sizeof(long)));
 
     // 1 bit per accounts, i.e., allocates ceilling(nbAccounts/ bitsInByte)
-#if CMP_TYPE == CMP_EXPLICIT
+#if HETM_CMP_TYPE == HETM_CMP_EXPLICIT
     memman_alloc_dual("HeTM_dev_rset", EXPLICIT_LOG_SIZE(cuda_info.blockNum, cuda_info.threadNum)*sizeof(int), 0);
     memman_zero_gpu(NULL);
-#elif CMP_TYPE == CMP_COMPRESSED
+#elif HETM_CMP_TYPE == HETM_CMP_COMPRESSED
     memman_alloc_dual("HeTM_dev_rset", nbAccounts / 8 + 1, 0);
     memman_zero_gpu(NULL);
 #else
@@ -188,8 +181,6 @@ cuda_t * jobWithCuda_init(account_t *accounts, int size, int trans, int hash, in
 #endif
 
     CHECK_ERROR_CONTINUE(cuda_configCpy(cuda_info));
-    long bpt = (long) ((void*)&accounts[0]);
-    CHECK_ERROR_CONTINUE(copyPointer(bpt));
 
     time_t t;
     time(&t);
@@ -418,7 +409,7 @@ int jobWithCuda_checkStream(cuda_t d, stream_t *st, HeTM_CPULogEntry *vec, int s
     memman_select("HeTM_cpu_versions");
     long *vers  = (long*)memman_get_gpu(NULL);
 
-#if CMP_TYPE == CMP_COMPRESSED
+#if HETM_CMP_TYPE == HETM_CMP_COMPRESSED
     // -----------------------------------------------
     //Calc number of blocks
     int bo = (size_stm + 31) / (32);
@@ -448,7 +439,7 @@ int jobWithCuda_checkStream(cuda_t d, stream_t *st, HeTM_CPULogEntry *vec, int s
 
     knlman_run();
     // -----------------------------------------------
-#elif CMP_TYPE == CMP_EXPLICIT
+#elif HETM_CMP_TYPE == HETM_CMP_EXPLICIT
     int xThrs = CMP_EXPLICIT_THRS_PER_RSET / CMP_EXPLICIT_THRS_PER_WSET;
     int yThrs = CMP_EXPLICIT_THRS_PER_WSET;
 
@@ -546,7 +537,7 @@ int jobWithCuda_dupd(cuda_t d, account_t *b)
   // }
 
   // Transfer comparison flag to device
-  cudaStatus = cudaMemset(PR_lockTableDev, 0, PR_LOCK_TABLE_SIZE*sizeof(int));	//copy new vector from CPU to GPU
+  // cudaStatus = cudaMemset(PR_lockTableDev, 0, PR_LOCK_TABLE_SIZE*sizeof(int));	//copy new vector from CPU to GPU
   if (cudaStatus != cudaSuccess) {
     printf("cudaMemcpy to device failed for PR_lockTableDev!\n");
     return 0;

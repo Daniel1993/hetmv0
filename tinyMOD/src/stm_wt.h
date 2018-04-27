@@ -560,6 +560,11 @@ stm_wt_commit(stm_tx_t *tx)
   /* Drop locks and set new timestamp */
   w = tx->w_set.entries;
   for (i = tx->w_set.nb_entries; i > 0; i--, w++) {
+#ifdef HETM_INSTRUMENT_CPU
+// #if LOG_AUTO==1 // TODO: do always
+    stm_log_newentry(tx->log, (long*)w->addr, *((long*)w->addr), t);
+// #endif
+#endif /*HETM_INSTRUMENT_CPU*/
     if (w->next == NULL) {
       /* No need for CAS (can only be modified by owner transaction) */
       ATOMIC_STORE(w->lock, LOCK_SET_TIMESTAMP(t));
@@ -573,4 +578,3 @@ end:
 }
 
 #endif /* _STM_WT_H_ */
-

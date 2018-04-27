@@ -17,7 +17,7 @@
  *	KERNELS
  ****************************************************************************/
 
-__global__ void queue_generate_kernel(curandState *state,  unsigned int *queue, int per_thread, int lower, int upper); //to setup random seed
+__global__ void queue_generate_kernel(long *state,  unsigned int *queue, int per_thread, int lower, int upper); //to setup random seed
 
 /****************************************************************************
  *	FUNCTIONS
@@ -27,7 +27,7 @@ __global__ void queue_generate_kernel(curandState *state,  unsigned int *queue, 
 extern "C" {
 #endif
 
-cudaError_t queue_Init(queue_t *q, cuda_t *c, int sr, int q_size, curandState *states);
+cudaError_t queue_Init(queue_t *q, cuda_t *c, int sr, int q_size, long *states);
 
 #ifdef __cplusplus
 }

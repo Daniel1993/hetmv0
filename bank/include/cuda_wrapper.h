@@ -2,7 +2,7 @@
 #define CUDA_WRAPPER_H_GUARD_
 
 #include <cuda.h>
-#include "log.h"
+#include "hetm-log.h"
 #include "cuda_defines.h"
 #include "hetm-types.h"
 
@@ -19,18 +19,9 @@
 // TODO: Number of comparisons sent to the GPU before restarting the kernel
 #define NB_CMP_RETRIES       2
 
-#define STM_LOG_BUFFER_SIZE  16 // multiplied by LOG_SIZE
-
 /****************************************************************************
  *	STRUCTURES
  ****************************************************************************/
-
-typedef enum {
-	READ,   // Executa transações
-	STREAM, // Inicia streams de cmp e Executa transações
-	FINAL,  // Bloqueia para acabar as cmp
-	END     // Bloqueia para acabar a sync (receber dados)
-} cmp_status;
 
 // TODO
 // typedef struct HeTM_shared_ {
@@ -52,8 +43,6 @@ typedef struct cuda_info {
 	int *dev_LogR;			   //Read Log array
 	int *dev_LogW;			   //Write Log array
 
-	HeTM_CPULogEntry *host_log;  //Host log array
-	int *dev_flag;         //Comparison flag
 	void *devStates;       //randseed array
 
 	int size;
@@ -62,25 +51,27 @@ typedef struct cuda_info {
 	int TransEachThread;
 	int set_percent;
 	int num_ways;
-	int clock;
 
 	// TODO: this is memcd
+	int clock;
+	int *version;
   queue_t *q;
 	unsigned int *gpu_queue;
+	cuda_output_t *output;
+	size_t queue_size;
+	long run_size;
+	int blockNumG;
 } cuda_t;
 
 typedef struct stream_info {
 	int id;
 	int count;
-	cmp_status status;
 	int isCmpDone;
 	int isThreshold;
 	int maxC;
 	int isCudaError;
 	cudaStream_t st;
 	pthread_mutex_t mutex;
-	HeTM_CPULogEntry *host_log;       //Host log array
-	HeTM_CPULogEntry *stream_log;
 } stream_t;
 
 /****************************************************************************
@@ -98,53 +89,23 @@ extern "C" {
 #endif
 
 // TODO: put GRANULE_T or account_t
-cuda_t * jobWithCuda_init(account_t *base, int size, int trans, int hash, int tx, int bl);
+cuda_t * jobWithCuda_init(account_t *base, int nbCPUThreads, int size, int trans, int hash, int tx, int bl, int hprob, float hmult);
 void jobWithCuda_initMemcd(cuda_t *cd, int ways, int wr, int sr); // memcd
-
-stream_t * jobWithCuda_initStream(cuda_t *d, int id, int count);
 
 int jobWithCuda_run(cuda_t *d, account_t *a);
 
-void jobWithCuda_wait();
-
-int jobWithCuda_checkStream(cuda_t *d, stream_t *st, size_t size_stm);
+int jobWithCuda_runMemcd(void *thread_data, cuda_t *d, account_t *a, int clock);
 
 account_t* jobWithCuda_swap(cuda_t *d);
 
 int jobWithCuda_cpyDatasetToGPU(cuda_t *d, account_t *b);
 
-int jobWithCuda_resetGPUSTMState(cuda_t *d);
-
-int jobWithCuda_hupd(cuda_t *d, account_t *a, int *bm);
-
 void jobWithCuda_getStats(cuda_t *d, long *ab, long *com);
 
 void jobWithCuda_exit(cuda_t * d);
 
-long* CudaMallocWrapper(size_t s);
-
-long* CudaZeroCopyWrapper(long *p);
-
-void CudaFreeWrapper(void *p);
-
-int jobWithCuda_bm(cuda_t *d, int *bm);
-
-void jobWithCuda_threadCheck(cuda_t *d, stream_t *s);
-
-// return the current CPU log node (i.e., that did not fit into the buffer), or NULL
-HeTM_CPULogNode_t* jobWithCuda_mergeLog(cudaStream_t stream, HeTM_CPULogNode_t *t, size_t *size, int isBlock);
-
-// returns if a conflict was found or not
-int jobWithCuda_checkStreamFinal(cuda_t *d, stream_t * st, int n);
-
-void jobWithCuda_exitStream(stream_t * s);
-
-void jobWithCuda_backup(cuda_t * d);
-
-void jobWithCuda_backupRestore(cuda_t * d);
-
 // TODO: memcd
-unsigned int* readQueue(queue_t *q, int size, int queue_id);
+unsigned int* readQueue(unsigned int *seed, queue_t *q, int size, int queue_id);
 void queue_Delete(queue_t *q);
 
 #ifdef __cplusplus
