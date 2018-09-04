@@ -1,6 +1,7 @@
 #include "setupKernels.cuh"
 #include "cmp_kernels.cuh"
 #include "bankKernel.cuh"
+#include "bank.h"
 
 extern pr_tx_args_s HeTM_pr_args; // TODO: in hetm-threading-gpu.cu
 
@@ -101,7 +102,9 @@ static void run_bankTx(knlman_callback_params_s params)
   pr_buffer_s inBuf, outBuf;
   HeTM_bankTx_input_s *input, *inputDev;
 
-  thread_local static unsigned long seed = 0x3F12514A3F12514A;
+  cudaSetDevice(0);
+
+  // thread_local static unsigned long seed = 0x3F12514A3F12514A;
 
   memman_select("HeTM_bankTxInput");
   input    = (HeTM_bankTx_input_s*)memman_get_cpu(NULL);
@@ -118,19 +121,23 @@ static void run_bankTx(knlman_callback_params_s params)
     d->dev_b = accounts;
   }
 
-  input->accounts = d->dev_a;
-  input->is_intersection = IS_INTERSECT_HIT( RAND_R_FNC(seed) );
+  input->accounts = d->dev_a; // a; // d->dev_a;
+  input->is_intersection = isInterBatch;
   input->nbAccounts = d->size;
-  memman_cpy_to_gpu(NULL, NULL);
 
-  // TODO: change PR-STM to use knlman
-  // PR_blockNum = params.blocks.x;
-  // PR_threadNum = params.threads.x;
   inBuf.buf = (void*)inputDev;
   inBuf.size = sizeof(HeTM_bankTx_input_s);
   outBuf.buf = NULL;
   outBuf.size = 0;
   PR_prepareIO(&HeTM_pr_args, inBuf, outBuf);
+
+  input->input_buffer = GPUInputBuffer;
+  input->output_buffer = GPUoutputBuffer;
+  memman_cpy_to_gpu(NULL, NULL);
+
+  // TODO: change PR-STM to use knlman
+  // PR_blockNum = params.blocks.x;
+  // PR_threadNum = params.threads.x;
   PR_run(bankTx, &HeTM_pr_args, NULL);
 }
 
@@ -161,12 +168,20 @@ static void run_memcdReadTx(knlman_callback_params_s params)
   input = (HeTM_memcdTx_input_s*)memman_get_cpu(NULL);
   inputDev = (HeTM_memcdTx_input_s*)memman_get_gpu(NULL);
 
-  input->accounts    = d->dev_a;
-  input->nbAccounts  = d->size;
-  input->tx_queue    = d->gpu_queue;
-  input->output      = d->output;
-  input->clock_value = d->clock;
-  input->ts_vec      = d->version;
+  input->key   = d->dev_a;
+  input->val   = input->key + (d->memcd_array_size/4); // TODO: /sizeof(...)
+  input->ts    = input->val + (d->memcd_array_size/4); // TODO: /sizeof(...)
+  input->state = input->ts  + (d->memcd_array_size/4); // TODO: /sizeof(...)
+  input->nbSets = d->num_sets;
+  input->nbWays = d->num_ways;
+  input->input_keys = GPUInputBuffer;
+  input->input_vals = GPUInputBuffer;
+  input->output     = (memcd_get_output_t*)GPUoutputBuffer;
+
+  memman_select("memcd_global_ts");
+  input->curr_clock = (int*)memman_get_gpu(NULL);
+
+  memman_select("HeTM_memcdTx_input");
   memman_cpy_to_gpu(NULL, NULL);
 
   // TODO:
@@ -206,15 +221,18 @@ static void run_memcdWriteTx(knlman_callback_params_s params)
   input = (HeTM_memcdTx_input_s*)memman_get_cpu(NULL);
   inputDev = (HeTM_memcdTx_input_s*)memman_get_gpu(NULL);
 
-  memman_select("memcd_gpu_queue");
-  // memman_cpy_to_gpu(NULL);
+  input->key   = d->dev_a;
+  input->val   = input->key + (d->memcd_array_size/4)/sizeof(PR_GRANULE_T);
+  input->ts    = input->val + (d->memcd_array_size/4)/sizeof(PR_GRANULE_T);
+  input->state = input->ts  + (d->memcd_array_size/4)/sizeof(PR_GRANULE_T);
+  input->nbSets = d->num_sets;
+  input->nbWays = d->num_ways;
+  input->input_keys = GPUInputBuffer;
+  input->input_vals = GPUInputBuffer;
+  input->output     = (memcd_get_output_t*)GPUoutputBuffer;
 
-  input->accounts    = d->dev_a;
-  input->nbAccounts  = d->size;
-  input->tx_queue    = (unsigned int*)memman_get_gpu(NULL)/*d->gpu_queue*/;
-  input->output      = d->output;
-  input->clock_value = d->clock;
-  input->ts_vec      = d->version;
+  memman_select("memcd_global_ts");
+  input->curr_clock = (int*)memman_get_gpu(NULL);
 
   memman_select("HeTM_memcdTx_input");
   memman_cpy_to_gpu(NULL, NULL);

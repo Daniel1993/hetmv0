@@ -23,6 +23,8 @@ if (((var) = (__typeof__((var)))malloc((nb) * sizeof(__typeof__(*(var))))) == NU
 #define barrier_destroy(b) ticket_barrier_destroy(&b)
 #define barrier_cross(b)   ticket_barrier_cross(&b)
 
+#define COMPILER_FENCE() asm("" ::: "memory")
+
 // TODO: The one below is crap (steals too much processor)
 // // adapted from: https://stackoverflow.com/questions/8115267/writing-a-spinning-thread-barrier-using-c11-atomics
 // #include "arch.h"

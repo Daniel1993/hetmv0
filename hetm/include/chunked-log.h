@@ -13,7 +13,7 @@
 #include "chunked-log-aux.h"
 
 typedef struct chunked_log_node_ {
-  char *chunk; // assuming sizeof(char) == 1 Byte (8 bits)
+  char* volatile chunk; // assuming sizeof(char) == 1 Byte (8 bits)
   size_t size; // total size in Bytes of the chunk
   size_t gran; // granularity of the elements in Bytes
   size_t nb_buckets;
@@ -29,6 +29,7 @@ typedef struct chunked_log_ {
   size_t gran; // granularity of the elements in Bytes
   size_t nb_elements; // number of elements with a given granularity
   size_t pos;  // position of the current (curr) node
+  int tid;
   chunked_log_node_s *first, *curr, *last;
 } chunked_log_s;
 
@@ -45,7 +46,15 @@ typedef struct mod_chunked_log_ {
  * Each time a thread frees a node, rather than releasing the memory, the node
  * is placed here. Upon alloc, the system checks if there are freed nodes.
  */
-static __thread chunked_log_s chunked_log_freeNode;
+#define SIZE_OF_FREE_NODES 0x100L // needs to be REALLY big!
+
+// TODO: cannot use __thread because the thread that FREEs is different!
+// use some sort of array[nb_threads]
+extern __thread chunked_log_node_s *chunked_log_node_recycled[SIZE_OF_FREE_NODES];
+extern __thread unsigned long chunked_log_free_ptr;
+extern __thread unsigned long chunked_log_alloc_ptr;
+extern __thread unsigned long chunked_log_free_r_ptr;
+extern __thread unsigned long chunked_log_alloc_r_ptr;
 
 #define CHUNKED_LOG_INIT_AUX(log, granularity, nbElements) ({ \
   (log)->gran = granularity; \
@@ -89,17 +98,19 @@ static __thread chunked_log_s chunked_log_freeNode;
   (log)->buckets = (log)->bucketsEnd = NULL; \
 })
 
+// TODO: threads are still freeing the logs while this runs
 #define CHUNKED_LOG_TEARDOWN() ({ \
-  chunked_log_node_s *node; \
-  node = CHUNKED_LOG_POP(&chunked_log_freeNode); \
-  while (node != NULL) { \
-    free(node->chunk); \
+  unsigned long k = chunked_log_free_ptr; \
+  unsigned long i = chunked_log_alloc_ptr; \
+  while (i < k || i > k - (SIZE_OF_FREE_NODES+1)) { \
+    chunked_log_node_s *node = chunked_log_node_recycled[i % SIZE_OF_FREE_NODES]; \
     if (node->nb_buckets > 0) free(node->p.posArray); \
+    free(node->chunk); \
     free(node); \
-    node = CHUNKED_LOG_POP(&chunked_log_freeNode); \
+    ++i; \
   } \
-  chunked_log_freeNode.curr = chunked_log_freeNode.last = chunked_log_freeNode.first = NULL; \
-  chunked_log_freeNode.size = 0; \
+  chunked_log_free_ptr = chunked_log_alloc_ptr = 0; \
+  __sync_synchronize(); \
 })
 
 /**
@@ -145,7 +156,8 @@ static __thread chunked_log_s chunked_log_freeNode;
 })
 
 #define CHUNKED_LOG_IS_EMPTY(log) ({ \
-  ((log)->size == 0 || ((log)->size == 1 && (log)->first->p.pos == 0)); \
+  chunked_log_node_s* volatile first = (log)->first; \
+  ((log)->size == 0 || ((log)->size == 1 && first != NULL && first->p.pos == 0)); \
 })
 
 #define MOD_CHUNKED_LOG_IS_EMPTY(log) ({ \
@@ -214,6 +226,7 @@ static __thread chunked_log_s chunked_log_freeNode;
     res->p.posArray = (size_t*)malloc(sizeof(size_t)*nbBuckets); \
   } \
   memset(res->p.posArray, 0, sizeof(size_t)*nbBuckets); \
+  memset(res->chunk, 0, size*nbBuckets); \
   res->nb_buckets = nbBuckets; \
   res->gran = size_one_element; \
   res->size = size; \
@@ -221,8 +234,17 @@ static __thread chunked_log_s chunked_log_freeNode;
   res; \
 })
 
+// TODO: if out of space to free --> this will crash
+// TODO: just use mallocs is much faster
 #define CHUNKED_LOG_FREE(node) ({ \
-  CHUNKED_LOG_EXTEND(&chunked_log_freeNode, node); \
+  /*unsigned long i = __sync_fetch_and_add(&chunked_log_free_r_ptr, 1); */\
+  unsigned long i = chunked_log_free_ptr++; \
+  chunked_log_node_recycled[i % SIZE_OF_FREE_NODES] = node; /* barrier needed? */ \
+  node->next = node->prev = NULL; /* TODO: this is fixing some bug in VERS */ \
+  /*__sync_fetch_and_add(&chunked_log_free_ptr, 1);*/ \
+  /*if (node->nb_buckets > 0) free(node->p.posArray); \
+  free(node->chunk);\
+  free(node);*/ \
 }) \
 
 #define CHUNKED_LOG_APPEND_AUX(log, node, el) ({ \
@@ -269,6 +291,13 @@ static __thread chunked_log_s chunked_log_freeNode;
   } \
 })
 
+#define CHUNKED_LOG_EXTEND_FORCE(log) ({ \
+  chunked_log_node_s *node = CHUNKED_LOG_ALLOC((log)->gran, (log)->nb_elements); \
+  CHUNKED_LOG_EXTEND((log), node); \
+})
+
+// TODO: FIXME --> (log)->buckets != node && node->prev != NULL
+// means that a prev pointer is not being init to ZERO properly
 #define MOD_CHUNKED_LOG_APPEND(log, el, addr) ({ \
   uintptr_t pos = (uintptr_t)(addr) % (log)->nb_buckets; /* TODO: use mod2 */ \
   chunked_log_node_s *node = (log)->bucketsEnd; \
@@ -276,7 +305,7 @@ static __thread chunked_log_s chunked_log_freeNode;
     node = MOD_CHUNKED_LOG_ALLOC((log)->gran, (log)->nb_elements, (log)->nb_buckets); \
     (log)->buckets = (log)->bucketsEnd = node; \
   } \
-  while (node->prev != NULL && node->p.posArray[pos] == 0) { \
+  while ((log)->buckets != node && node->prev != NULL && node->p.posArray[pos] == 0) { \
     /* check if previous has space */ \
     if (node->prev->p.posArray[pos] < node->prev->size) { \
       node = node->prev; \

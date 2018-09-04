@@ -41,6 +41,10 @@ typedef struct HeTM_knl_global_ {
 	size_t nbGranules;
   void *devRSet;
   void *hostWSet;
+  void *hostWSetCache;
+  void *hostWSetCacheConfl;
+  size_t hostWSetCacheSize;
+  size_t hostWSetCacheBits;
 	int *PRLockTable;
 	void *randState;
 } HeTM_knl_global_s;
@@ -63,7 +67,10 @@ size_t HeTM_get_explicit_log_block_size();
 
 #if HETM_LOG_TYPE == HETM_BMAP_LOG
 // HETM_BMAP_LOG requires a specific kernel
-__global__ void HeTM_knl_checkTxBitmap(HeTM_knl_cmp_args_s args);
+__global__ void HeTM_knl_checkTxBitmap(HeTM_knl_cmp_args_s args, size_t offset);
+__global__ void HeTM_knl_checkTxBitmapCache(HeTM_knl_cmp_args_s args);
+__global__ void HeTM_knl_checkTxBitmap_Explicit(HeTM_knl_cmp_args_s args);
+__global__ void HeTM_knl_writeTxBitmap(HeTM_knl_cmp_args_s args, size_t offset);
 #endif /* HETM_LOG_TYPE == HETM_BMAP_LOG */
 
 #if HETM_LOG_TYPE != HETM_BMAP_LOG

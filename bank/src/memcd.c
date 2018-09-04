@@ -15,7 +15,7 @@
 // global
 thread_data_t parsedData;
 
-static volatile int global_ts;
+static volatile int global_ts = 1;
 
 packet_t search_entry(memcd_t *b, unsigned int *positions)
 {
@@ -40,7 +40,8 @@ packet_t search_entry(memcd_t *b, unsigned int *positions)
       response.vers = vers;
     }
     n -= 1;
-    TM_STORE(&b->version[base+n], global_ts);
+    vers++;
+    TM_STORE(&b->version[base+n], vers);
   }
   TM_COMMIT; // TODO: this must be at the same level as TM_START
 
@@ -67,10 +68,13 @@ packet_t new_entry(memcd_t *b, unsigned int *positions)
   base = positions[0] * b->ways; // position in the hash map
   goal = positions[0] & 0xffff;
 
+  // printf("\nbase=%5i goal=%5i b->ways=%5i\n", base, goal, b->ways);
   for (n = 0; n < b->ways; n++) {
 
 	  val = TM_LOAD(&b->accounts[base+n]);
 	  vers = TM_LOAD(&b->version[base+n]);
+
+    // printf("   n=%5i  val=%5i    vers=%5i\n", n, val, vers);
 
 	  // Check if it is free or if it is the same value
 	  if (val == goal || vers == 0) {
@@ -85,9 +89,13 @@ packet_t new_entry(memcd_t *b, unsigned int *positions)
 	  }
   }
 
-  TM_STORE(&b->accounts[base + min_pos], goal);
-  TM_STORE(&b->version[base + min_pos], global_ts);
+  vers++; // increase the TS
 
+  TM_STORE(&b->accounts[base + min_pos], goal);
+  TM_STORE(&b->version[base + min_pos], vers);
+  // printf("b->accounts[%i]=%i b->version[%i]=%i min_pos=%i global_ts=%i\n",
+  //   base + min_pos, b->accounts[base + min_pos], base + min_pos,
+  //   b->version[base + min_pos], min_pos, global_ts);
 
   response.key = goal;
   response.vers = base + min_pos;
@@ -167,6 +175,8 @@ static void test_cuda(int id, void *data)
   cd->clock++;
 
   jobWithCuda_runMemcd(d, cd, accounts, global_ts);
+
+  global_ts++; // TODO
 }
 
 static void afterGPU(int id, void *data)
@@ -281,7 +291,8 @@ int main(int argc, char **argv)
 
   cuda_t *cuda_st;
   cuda_st = jobWithCuda_init(memcd->accounts, parsedData.nb_threadsCPU,
-    memcd->size, parsedData.trans, 0, parsedData.GPUthreadNum, parsedData.GPUblockNum);
+    memcd->size, parsedData.trans, 0, parsedData.GPUthreadNum, parsedData.GPUblockNum,
+    parsedData.hprob, parsedData.hmult);
 
   cuda_st->threadNum = parsedData.GPUthreadNum;
   cuda_st->blockNum  = parsedData.GPUblockNum;
@@ -313,10 +324,10 @@ int main(int argc, char **argv)
     // ##############################################
     // ### create threads
     // ##############################################
+    printf(" >>> Creating %d threads\n", parsedData.nb_threads);
     for (i = 0; i < parsedData.nb_threads; i++) {
       /* SET CPU AFFINITY */
       /* INIT DATA STRUCTURE */
-      printf("Creating thread %d\n", i);
       // remove last iter status
       parsedData.reads = parsedData.writes = parsedData.updates = 0;
       parsedData.nb_aborts = 0;

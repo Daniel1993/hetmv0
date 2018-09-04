@@ -28,6 +28,7 @@
     fprintf(stderr, "Error joining thread at " __FILE__ ":%i\n", __LINE__); \
     exit(EXIT_FAILURE); \
   } \
+//
 
 // -------------------- // TODO: organize them
 // Functions
@@ -167,9 +168,11 @@ static void* threadWait(void *argPtr)
   barrier_cross(wait_callback); /* wait for start parallel */
 	while (1) {
 		while (callback == NULL) {
+      // COMPILER_FENCE();
+      __sync_synchronize();
       callback = args->callback;
       if (HeTM_is_stop()) break;
-      pthread_yield();
+      // pthread_yield();
     }
     if (HeTM_is_stop()) break;
 

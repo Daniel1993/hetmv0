@@ -82,12 +82,11 @@ BANK_OBJS  := \
 	$(SRC)/kernel.o
 
 MEMCD_OBJS  := \
-	$(SRC)/memcd.o \
+	$(SRC)/memcd2.o \
 	$(SRC)/bankKernel.o \
 	$(SRC)/cmp_kernels.o \
 	$(SRC)/shared.o \
 	$(SRC)/setupKernels.o \
-	$(SRC)/tx_queue.o \
 	$(SRC)/memcdKernel.o \
 	$(SRC)/kernel.o
 
@@ -146,8 +145,23 @@ $(APP): $(OBJS)
 		HETM_DISABLE_CHUNKS=$(DHETM_DISABLE_CHUNKS) \
 		PRINT_DEB=$(PRINT_DEB)
 	@echo " ============================================ "
+	@echo " === Building HeTM lib (again) "
+	@echo " ============================================ "
+	$(MAKE) --directory $(HETM_ROOT) clean
+	$(MAKE) -j14 --directory $(HETM_ROOT) \
+		USE_TSX_IMPL=$(USE_TSX_IMPL) \
+		CMP_TYPE=$(CMP_TYPE) \
+		LOG_TYPE=$(LOG_TYPE) \
+		PR_MAX_RWSET_SIZE=$(PR_MAX_RWSET_SIZE) \
+		CFG=$(CFG) \
+		PROFILE=$(PROFILE) \
+		INST_CPU=$(INST_CPU) \
+		HETM_DISABLE_CHUNKS=$(DHETM_DISABLE_CHUNKS) \
+		PRINT_DEB=$(PRINT_DEB)
 	@echo "Linking..."
-	$(CC) $(CXXFLAGS) -O2 -o $(SRC)/bank.o $(SRC)/bank.cpp
+	### TODO: optimization breaks performance
+	$(CXX) $(CXXFLAGS) -O2 -o $(SRC)/bank.o $(SRC)/bank.cpp
+	#$(CXX) $(CXXFLAGS) -O2 -o $(SRC)/memcd2.o $(SRC)/memcd2.cpp
 	$(NVCC) $(LDFLAGS) -o $@ $(OBJS)
 
 %.o:	%.c
@@ -162,6 +176,9 @@ $(APP): $(OBJS)
 	@echo ""
 	$(NVCC) $(NVFLAGS) -o $@ $<
 
+zipf:
+	g++ -I ./include ./src/test_zipf.cpp -o gen_zip -std=c++14
+
 run:
 	make all
 	nvprof ./bank -n 4 -r 5000 -w 5000 -a 200000
@@ -170,4 +187,6 @@ ptx:
 	$(NVCC) $(NVFLAGS) $(NV_DEB_FLAGS) --ptx cmp_kernels.cu
 
 clean:
+	$(MAKE) --directory $(HETM_ROOT) clean
+	$(MAKE) --directory $(HETM_ROOT) clean
 	rm -f $(APP) *.o $(SRC)/*.o

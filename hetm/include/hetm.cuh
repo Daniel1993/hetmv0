@@ -13,10 +13,11 @@
 #define HETM_PC_BUFFER_SIZE          0x100
 #define CONTINUE_COND (!HeTM_is_stop() || HeTM_get_GPU_status() != HETM_IS_EXIT)
 
+#define HETM_CMP_DISABLED   0
 #define HETM_CMP_COMPRESSED 1
 #define HETM_CMP_EXPLICIT   2
 #ifndef HETM_CMP_TYPE
-#define HETM_CMP_TYPE HETM_CMP_COMPRESSED
+#define HETM_CMP_TYPE HETM_CMP_DISABLED
 #endif
 
 typedef enum {
@@ -30,7 +31,8 @@ typedef enum {
   HETM_CMP_STARTED = 1, // execution ended --> start comparing
   HETM_CPY_ASYNC   = 2, // copy while running TXs
   HETM_CMP_ASYNC   = 3, // CMP while running TXs
-  HETM_CMP_BLOCK   = 4  // block CPU while the compare completes
+  HETM_DONE_ASYNC  = 4, // after cpy and cmp
+  HETM_CMP_BLOCK   = 5  // block CPU while the compare completes
 } HETM_CMP_STATE;
 
 typedef enum {
@@ -52,13 +54,15 @@ typedef struct HeTM_thread_
   HeTM_callback callback;
   void *args;
   pthread_t thread;
+  int didCallCmp;
 
   // algorithm specific
   HETM_LOG_T *wSetLog;
-  int isCmpDone; // TODO: move this to HeTM_shared_s
-  int countCpy; // TODO: move this to HeTM_shared_s
-  int nbCpyDone; // TODO: move this to HeTM_shared_s
-  int isCpyDone; // TODO: move this to HeTM_shared_s
+  volatile int isCmpDone;
+  volatile int isCmpVoid;
+  int countCpy;
+  int nbCpyDone;
+  volatile int isCpyDone;
 
   cudaEvent_t cmpStartEvent, cmpStopEvent;
   float timeCmp;
@@ -78,22 +82,26 @@ typedef struct HeTM_thread_
   long curNbTxs /* count all */, curNbTxsNonBlocking /* ADDR|VERS */;
   void *stream; // cudaStream_t
 
-  int isFirstChunk;
+  volatile int isFirstChunk;
   size_t emptySpaceFirstChunk;
 
   TIMER_T backoffBegTimer;
   TIMER_T backoffEndTimer;
   TIMER_T blockingEndTimer;
+  TIMER_T beforeCpyLogs;
+  TIMER_T beforeCmpKernel;
+
+  double timeLogs;
+  double timeCmpKernels;
   double timeBackoff;
   double timeBlocked;
-}
-HeTM_thread_s;
+} HeTM_thread_s;
 
 // sigleton
 typedef struct HeTM_shared_
 {
   // configuration
-  HETM_INVALIDATE_POLICY policy;
+  volatile HETM_INVALIDATE_POLICY policy;
   int nbCPUThreads, nbGPUBlocks, nbGPUThreads;
   int isCPUEnabled, isGPUEnabled, nbThreads;
 
@@ -105,10 +113,9 @@ typedef struct HeTM_shared_
 
   // memory pool
   void *hostMemPool, *devMemPool, *devVersions;
+  void *devMemPoolShadow;
   void *devChunks;
-#if HETM_LOG_TYPE == HETM_ADDR_LOG || HETM_LOG_TYPE == HETM_BMAP_LOG
-  void *devMemPoolBackup;
-#endif
+  void *devMemPoolBackup; // only for HETM_ADDR_LOG and HETM_BMAP_LOG
   size_t sizeMemPool;
 
   // inter-conflict flag
@@ -118,14 +125,21 @@ typedef struct HeTM_shared_
   void *wsetLog, *rsetLog;
   size_t wsetLogSize, rsetLogSize;
 
+  // BMAP only, stores a cache for the wsetLog
+  void *wsetCache;
+  void *wsetCacheConfl;
+  size_t wsetCacheSize, wsetCacheBits;
+
   // TODO: remove this is benchmark specific
   void *devCurandState; // type is curandState*
   size_t devCurandStateSize;
 
   HeTM_thread_s *threadsInfo;
   pthread_t asyncThread;
-}
-HeTM_shared_s;
+
+  cudaEvent_t batchStartEvent, batchStopEvent;
+
+} HeTM_shared_s;
 
 typedef struct HeTM_statistics_ {
   long nbBatches, nbBatchesSuccess, nbBatchesFail;
@@ -156,6 +170,15 @@ extern HeTM_statistics_s HeTM_stats_data;
 extern hetm_pc_s *HeTM_offload_pc;
 extern __thread HeTM_thread_s *HeTM_thread_data;
 extern void *HeTM_memStream;
+
+#ifdef HETM_OLD_BMAP_IMPL
+// Use a cache with 1 value written/not-written
+const int CACHE_GRANULE_SIZE = 2147483648; // 2GB
+const int CACHE_GRANULE_BITS = 31;
+#else /* new one */
+const int CACHE_GRANULE_SIZE = 4096;
+const int CACHE_GRANULE_BITS = 12;
+#endif /* HETM_OLD_BMAP_IMPL */
 
 #ifdef __cplusplus
 extern "C" {
@@ -204,6 +227,14 @@ int HeTM_after_cpu_finish(HeTM_callback);
 int HeTM_before_gpu_start(HeTM_callback);
 int HeTM_after_gpu_finish(HeTM_callback);
 
+int HeTM_choose_policy(HeTM_callback);
+
+// neither CPU nor GPU are running (executes after HeTM_after_batch)
+int HeTM_before_batch(HeTM_callback);
+
+// neither CPU nor GPU are running (executes before HeTM_after_batch)
+int HeTM_after_batch(HeTM_callback);
+
 // Registers a callback to be later executed (serially in a side thread)
 void HeTM_async_request(HeTM_async_req_s req);
 void HeTM_free_async_request(HeTM_async_req_s *req); // Do not call this
@@ -216,7 +247,7 @@ int HeTM_join_CPU_threads();
 //----------------------
 
 //---------------------- getters/setters
-int HeTM_get_inter_confl_flag();
+int HeTM_get_inter_confl_flag(void *stream);
 int HeTM_reset_inter_confl_flag();
 #define HeTM_set_is_stop(isStop)       (HeTM_shared_data.stopFlag = isStop)
 #define HeTM_is_stop()                 (HeTM_shared_data.stopFlag)

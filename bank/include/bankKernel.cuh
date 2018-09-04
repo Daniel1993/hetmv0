@@ -18,7 +18,7 @@
 // TODO: extend PR-STM here in order to have the logs...
 #include "cmp_kernels.cuh"
 #include "bank.h"
-#include "tx_queue.cuh" // TODO: memcd
+// #include "tx_queue.cuh" // TODO: memcd
 
 /****************************************************************************
  *	STRUCTURES
@@ -53,15 +53,21 @@ typedef struct HeTM_bankTx_input_ {
 	PR_GRANULE_T *accounts;
   size_t nbAccounts;
 	int is_intersection;
+  int *input_buffer;
+  int *output_buffer;
 } HeTM_bankTx_input_s;
 
 typedef struct HeTM_memcdTx_input_ {
-	PR_GRANULE_T *accounts;  /* values in global memory */
-  int *ts_vec;             /* timestamp array         */
-  cuda_output_t *output;   /* produced results        */
-  size_t nbAccounts;       /* size of the data-set    */
-	int clock_value;         /* sync timestamp          */
-	unsigned int *tx_queue;  /* transaction queue       */
+	PR_GRANULE_T *key;           /* keys in global memory */
+	PR_GRANULE_T *val;           /* values in global memory */
+	PR_GRANULE_T *ts;            /* last access TS in global memory */
+	PR_GRANULE_T *state;         /* state in global memory */
+  int nbSets;
+  int nbWays;
+  int *curr_clock;
+  memcd_get_output_t *output;  /* only for the GET kernel */
+  int *input_keys;             /* target input keys */
+  int *input_vals;             /* only for the SET kernel */
 } HeTM_memcdTx_input_s;
 
 /*********************************
@@ -75,8 +81,10 @@ __global__ void bankTx(PR_globalKernelArgs);
 
 __global__ void memcdWriteTx(PR_globalKernelArgs);
 
+__global__ void memcd_check(PR_GRANULE_T* keys, size_t size);
+
 __global__
-__launch_bounds__(1024, 1)
+// __launch_bounds__(1024, 1)
 void memcdReadTx(PR_globalKernelArgs);
 
 /****************************************************************************

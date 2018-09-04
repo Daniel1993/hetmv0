@@ -25,7 +25,11 @@ static void exitThread(int id, void *data);
 #if HETM_LOG_TYPE != HETM_BMAP_LOG
 static int consecutiveFlagCpy = 0; // avoid consecutive copies
 
+thread_local static int reachedTheEnd = 0; // avoid consecutive copies
 thread_local static int inBackoff = 0;
+thread_local static int nbCpyRounds = 0;
+thread_local static int doneWithLog = 0;
+static volatile int countDoneWithLog = 0;
 
 static int launchCmpKernel(HeTM_thread_s*, size_t wsetSize);
 static void checkCmpDone();
@@ -62,8 +66,12 @@ void HeTM_cpu_thread()
   } else {
     while (CONTINUE_COND) {
 #if HETM_LOG_TYPE != HETM_BMAP_LOG
-      checkCmpDone();
-      cpyWSetToGPU(); // Tests if ready
+  #ifdef DISABLE_NON_BLOCKING
+      cmpBlockApply(); // Block immediately
+  #else /* VERS_DISABLE_NON_BLOCKING */
+      checkCmpDone(); // Tests if ready
+      cpyWSetToGPU();
+  #endif /* VERS_DISABLE_NON_BLOCKING */
 #else /* HETM_LOG_TYPE == HETM_BMAP_LOG */
       if (HeTM_get_GPU_status() == HETM_BATCH_DONE) {
         NVTX_PUSH_RANGE("blocked", NVTX_PROF_BLOCK);
@@ -120,11 +128,10 @@ static void initThread(int id, void *data)
 
 static void exitThread(int id, void *data)
 {
-  HETM_DEB_THRD_CPU("Time cpy WSet = %10fms - Time cmp = %10fms \n",
-    HeTM_thread_data->timeCpySum, HeTM_thread_data->timeCmpSum);
-
-  printf("[%i] Total empty space first chunk = %zu B\n",
-    HeTM_thread_data->id, HeTM_thread_data->emptySpaceFirstChunk);
+  HETM_DEB_THRD_CPU("Time cpy WSet = %10fms - Time cmp = %10fms \n"
+    "Total empty space first chunk = %zu B\n",
+    HeTM_thread_data->timeCpySum, HeTM_thread_data->timeCmpSum,
+    HeTM_thread_data->emptySpaceFirstChunk);
 
   HeTM_statsMutex.lock();
   HeTM_stats_data.totalTimeCpyWSet += HeTM_thread_data->timeCpySum;
@@ -150,17 +157,28 @@ static void asyncCpy(void *argsPtr)
 
   threadData->curWSetSize = STM_LOG_BUFFER_SIZE*LOG_SIZE*LOG_ACTUAL_SIZE*sizeof(HeTM_CPULogEntry);
   truncated = MOD_CHUNKED_LOG_TRUNCATE(threadData->wSetLog, STM_LOG_BUFFER_SIZE);
+
+  // size_t logSize=0;
+  // chunked_log_node_s *node = threadData->wSetLog->buckets;
+  // while (node != NULL) {
+  //   logSize++;
+  //   node = node->next;
+  // }
+  // printf("log size = %zu\n", logSize);
+
   if (truncated.first != NULL) {
     HeTM_wset_log_cpy_to_gpu(threadData, truncated.first, &threadData->curWSetSize);
     CHUNKED_LOG_DESTROY(&truncated);
   }
   consecutiveFlagCpy = 0; // allow to cpy the flag
+  threadData->wSetLog->curr = truncated.first; // this one is to erase
 #else /* HETM_LOG_TYPE == HETM_VERS_LOG */
   chunked_log_node_s *truncated;
   // truncates the exact amount
   truncated = stm_log_truncate(threadData->wSetLog);
   consecutiveFlagCpy = 0; // allow to cpy the flag
   HeTM_wset_log_cpy_to_gpu(threadData, truncated, &threadData->curWSetSize);
+  threadData->wSetLog->curr = truncated; // this one is to erase
 #endif /* HETM_LOG_TYPE == HETM_VERS_LOG */
   HETM_DEB_THRD_CPU("Buffered WSet of size %zu\n", threadData->curWSetSize);
 }
@@ -168,10 +186,30 @@ static void asyncCpy(void *argsPtr)
 static void asyncCmp(void *argsPtr)
 {
   HeTM_thread_s *threadData = (HeTM_thread_s*)argsPtr;
-
   consecutiveFlagCpy = 0; // allow to cpy the flag
-
   launchCmpKernel(threadData, threadData->curWSetSize);
+}
+
+static void enterBackoffFn()
+{
+  if (!inBackoff) {
+    NVTX_PUSH_RANGE("backoff_mode", NVTX_PROF_BACKOFF);
+    inBackoff = 1;
+  }
+  HeTM_thread_data->statusCMP = HETM_CPY_ASYNC;
+  HeTM_thread_data->isCpyDone = 0;
+  // CHUNKED_LOG_EXTEND_FORCE(HeTM_thread_data->wSetLog);
+  __sync_synchronize(); // sync the log
+  HeTM_async_request((HeTM_async_req_s){
+    .args = (void*)HeTM_thread_data,
+    .fn = asyncCpy
+  });
+
+  // TODO: I'm spamming these
+  HeTM_async_request((HeTM_async_req_s){
+    .args = NULL,
+    .fn = asyncGetInterConflFlag
+  });
 }
 
 static void cpyWSetToGPU()
@@ -179,7 +217,8 @@ static void cpyWSetToGPU()
   // did the GPU finished the batch?
   if (HeTM_get_GPU_status() != HETM_BATCH_DONE) return;
 
-  if (inBackoff == 0) {
+  if (!inBackoff) {
+    nbCpyRounds = HeTM_thread_data->wSetLog->size / STM_LOG_BUFFER_SIZE;
     TIMER_READ(HeTM_thread_data->backoffBegTimer);
   }
 
@@ -193,69 +232,59 @@ static void cpyWSetToGPU()
   if (HeTM_thread_data->isCpyDone && HeTM_thread_data->statusCMP == HETM_CPY_ASYNC) {
     HeTM_thread_data->statusCMP = HETM_CMP_ASYNC;
     HeTM_thread_data->isCmpDone = 0;
+    HeTM_thread_data->isCmpVoid = 0;
 
-    CUDA_EVENT_SYNCHRONIZE(HeTM_thread_data->cpyWSetStartEvent);
-    CUDA_EVENT_SYNCHRONIZE(HeTM_thread_data->cpyWSetStopEvent);
-    CUDA_EVENT_ELAPSED_TIME(&HeTM_thread_data->timeCpy, HeTM_thread_data->cpyWSetStartEvent,
-      HeTM_thread_data->cpyWSetStopEvent);
-    if (HeTM_thread_data->timeCpy > 0) { // TODO: else is boggus ---> happens a lot
-      HeTM_thread_data->timeCpySum += HeTM_thread_data->timeCpy;
-    }
+    TIMER_T now;
+    TIMER_READ(now);
+    HeTM_thread_data->timeCpy = TIMER_DIFF_SECONDS(HeTM_thread_data->beforeCpyLogs, now) * 1000.0f;
+    HeTM_thread_data->timeCpySum += HeTM_thread_data->timeCpy;
     HeTM_async_request((HeTM_async_req_s){
       .args = (void*)HeTM_thread_data,
       .fn = asyncCmp
     });
-    // printf("Cpy done for worker %i\n", HeTM_thread_data->id);
+
+    // FREEs the log used in the transfers
+    while (HeTM_thread_data->wSetLog->curr != NULL) {
+      chunked_log_node_s *node = HeTM_thread_data->wSetLog->curr;
+      HeTM_thread_data->wSetLog->curr = HeTM_thread_data->wSetLog->curr->next;
+      CHUNKED_LOG_FREE(node);
+    }
+
+    // __sync_synchronize();
     return;
   }
 
-  if (HeTM_thread_data->isCmpDone) { // cmp completed
+  if (HeTM_thread_data->isCmpDone && HeTM_thread_data->statusCMP == HETM_CMP_ASYNC) { // cmp completed
+    HeTM_thread_data->statusCMP = HETM_DONE_ASYNC;
     // TODO: this slows down the GPU --> put into a #ifdef
-    CUDA_EVENT_SYNCHRONIZE(HeTM_thread_data->cmpStartEvent);
-    CUDA_EVENT_SYNCHRONIZE(HeTM_thread_data->cmpStopEvent);
-    CUDA_EVENT_ELAPSED_TIME(&HeTM_thread_data->timeCmp, HeTM_thread_data->cmpStartEvent,
-      HeTM_thread_data->cmpStopEvent);
-    HeTM_thread_data->timeCmpSum += HeTM_thread_data->timeCmp;
+    if (!HeTM_thread_data->isCmpVoid) {
+      CUDA_EVENT_SYNCHRONIZE(HeTM_thread_data->cmpStartEvent);
+      CUDA_EVENT_SYNCHRONIZE(HeTM_thread_data->cmpStopEvent);
+      CUDA_EVENT_ELAPSED_TIME(&HeTM_thread_data->timeCmp, HeTM_thread_data->cmpStartEvent,
+        HeTM_thread_data->cmpStopEvent);
+      if (HeTM_thread_data->timeCmp > 0) { // TODO: boggus
+        HeTM_thread_data->timeCmpSum += HeTM_thread_data->timeCmp;
+      }
+    }
+    return;
   }
 
-	HeTM_thread_data->isCmpDone = 0;
   __sync_synchronize();
-	if (HeTM_thread_data->statusCMP == HETM_CMP_BLOCK) {
+	if (countDoneWithLog == HeTM_shared_data.nbCPUThreads) {
+    // can only enter here if no cpy or cmp is running
 		/* stop sending comparison kernels to the GPU */
     cmpBlockApply();
-	} else {
-
-    // 1st policy --> if enough log do not block
-#if HETM_LOG_TYPE == HETM_VERS2_LOG
-    if (!MOD_CHUNKED_LOG_IS_FLAT(HeTM_thread_data->wSetLog)) {
-#else
-    int i = HeTM_thread_data->wSetLog->size;
-    if (i > STM_LOG_BUFFER_SIZE) {
-#endif
-      // continue running the CPU
-      if (!inBackoff) {
-        // printf("[%i] enter backoff\n", HeTM_thread_data->id);
-        NVTX_PUSH_RANGE("backoff_mode", NVTX_PROF_BACKOFF);
-        inBackoff = 1;
-      }
-      HeTM_thread_data->statusCMP = HETM_CPY_ASYNC;
-      HeTM_async_request((HeTM_async_req_s){
-        .args = (void*)HeTM_thread_data,
-        .fn = asyncCpy
-      });
-
-      // TODO: I'm spamming these
-      HeTM_async_request((HeTM_async_req_s){
-        .args = NULL,
-        .fn = asyncGetInterConflFlag
-      });
-    } else {
-      // all comparison fit in the buffer OR stop in next iteration
-      HeTM_thread_data->statusCMP = HETM_CMP_BLOCK;
-      cmpBlockApply();
-    }
-	}
-  HeTM_thread_data->nbCmpLaunches++; // case that CPU is faster than GPU
+	} else if (HeTM_thread_data->nbCmpLaunches < nbCpyRounds) {
+    // --------------------------------------
+    // continue running the CPU
+    enterBackoffFn();
+    // --------------------------------------
+  } else if (!doneWithLog) {
+    doneWithLog = 1;
+    __sync_add_and_fetch(&countDoneWithLog, 1);
+    HeTM_thread_data->statusCMP = HETM_CMP_BLOCK;
+  }
+  HeTM_thread_data->nbCmpLaunches++; // TODO: case that CPU is faster than GPU
 }
 
 static void cmpBlockApply()
@@ -273,15 +302,16 @@ static void cmpBlockApply()
     .fn = asyncGetInterConflFlag
   });
 
-  HETM_DEB_THRD_CPU("Thread %i reachead CMP threshold WSetSize=%zu(x64k)",
-    HeTM_thread_data->id, curNodeSize);
-#if HETM_LOG_TYPE == HETM_VERS2_LOG
-  if (MOD_CHUNKED_LOG_IS_EMPTY(HeTM_thread_data->wSetLog)) {
-#else
-  if (CHUNKED_LOG_IS_EMPTY(HeTM_thread_data->wSetLog)) {
-#endif
-    HeTM_thread_data->isCmpDone = 1;
-  }
+//   HETM_DEB_THRD_CPU("Thread %i reachead CMP threshold WSetSize=%zu(x64k)",
+//     HeTM_thread_data->id, curNodeSize);
+// #if HETM_LOG_TYPE == HETM_VERS2_LOG
+//   if (MOD_CHUNKED_LOG_IS_EMPTY(HeTM_thread_data->wSetLog)) {
+// #else
+//   if (CHUNKED_LOG_IS_EMPTY(HeTM_thread_data->wSetLog)) {
+// #endif
+//     HeTM_thread_data->isCmpDone = 1;
+//     __sync_synchronize();
+//   }
   if (inBackoff) {
     // printf("[%i] exit backoff\n", HeTM_thread_data->id);
     NVTX_POP_RANGE();
@@ -303,47 +333,60 @@ static void cmpBlockApply()
       !CHUNKED_LOG_IS_EMPTY(HeTM_thread_data->wSetLog)
 #endif
     ) {
+      HeTM_thread_data->isCpyDone = 0;
       HeTM_thread_data->isCmpDone = 0;
-      __sync_synchronize();
-#if HETM_LOG_TYPE == HETM_VERS_LOG
-      if (HeTM_thread_data->wSetLog->first->p.pos == 0) break;
-#endif
+      HeTM_thread_data->isCmpVoid = 0;
+      // __sync_synchronize();
+// #if HETM_LOG_TYPE == HETM_VERS_LOG
+//       if (HeTM_thread_data->wSetLog->first->p.pos == 0) break;
+// #endif
 
+      __sync_synchronize(); // sync the log
       HeTM_async_request((HeTM_async_req_s){
         .args = (void*)HeTM_thread_data,
         .fn = asyncCpy
       });
 
+      COMPILER_FENCE();
       while (!HeTM_thread_data->isCpyDone) {
-        // __sync_synchronize();
         // _mm_pause();
-        pthread_yield(); // block
+        // pthread_yield(); // block
+        // __sync_synchronize();
       }
 
-      CUDA_EVENT_SYNCHRONIZE(HeTM_thread_data->cpyWSetStartEvent);
-      CUDA_EVENT_SYNCHRONIZE(HeTM_thread_data->cpyWSetStopEvent);
-      CUDA_EVENT_ELAPSED_TIME(&HeTM_thread_data->timeCpy, HeTM_thread_data->cpyWSetStartEvent,
-        HeTM_thread_data->cpyWSetStopEvent);
-      if (HeTM_thread_data->timeCpy > 0) { // TODO: bug
-        HeTM_thread_data->timeCpySum += HeTM_thread_data->timeCpy;
+      TIMER_T now;
+      TIMER_READ(now);
+      HeTM_thread_data->timeCpy = TIMER_DIFF_SECONDS(HeTM_thread_data->beforeCpyLogs, now) * 1000.0f;
+      HeTM_thread_data->timeCpySum += HeTM_thread_data->timeCpy;
+
+      while (HeTM_thread_data->wSetLog->curr != NULL) {
+        chunked_log_node_s *node = HeTM_thread_data->wSetLog->curr;
+        HeTM_thread_data->wSetLog->curr = HeTM_thread_data->wSetLog->curr->next;
+        CHUNKED_LOG_FREE(node);
       }
 
+      // starts the kernel as soon as the memory is copied in that stream
       HeTM_async_request((HeTM_async_req_s){
         .args = (void*)HeTM_thread_data,
         .fn = asyncCmp
       });
 
+      COMPILER_FENCE();
       while (!HeTM_thread_data->isCmpDone) {
-        // __sync_synchronize();
         // _mm_pause();
-        pthread_yield(); // block
+        // pthread_yield(); // block
+        // __sync_synchronize();
       }
 
-      CUDA_EVENT_SYNCHRONIZE(HeTM_thread_data->cmpStartEvent);
-      CUDA_EVENT_SYNCHRONIZE(HeTM_thread_data->cmpStopEvent);
-      CUDA_EVENT_ELAPSED_TIME(&HeTM_thread_data->timeCmp, HeTM_thread_data->cmpStartEvent,
-        HeTM_thread_data->cmpStopEvent);
-      HeTM_thread_data->timeCmpSum += HeTM_thread_data->timeCmp;
+      if (!HeTM_thread_data->isCmpVoid) {
+        CUDA_EVENT_SYNCHRONIZE(HeTM_thread_data->cmpStartEvent);
+        CUDA_EVENT_SYNCHRONIZE(HeTM_thread_data->cmpStopEvent);
+        CUDA_EVENT_ELAPSED_TIME(&HeTM_thread_data->timeCmp, HeTM_thread_data->cmpStartEvent,
+          HeTM_thread_data->cmpStopEvent);
+        if (HeTM_thread_data->timeCmp > 0) { // TODO: bug here
+          HeTM_thread_data->timeCmpSum += HeTM_thread_data->timeCmp;
+        }
+      }
 
       HeTM_async_request((HeTM_async_req_s){
         .args = NULL,
@@ -359,6 +402,7 @@ static void cmpBlockApply()
 
   HeTM_sync_barrier(); // /* Wake up GPU controller thread */
   HeTM_sync_barrier(); // /* wait to set the cuda_stop flag to 0 */
+  // printf("[%i] <<<<<<<<< NEW ROUND >>>>>>>>>>>>\n", HeTM_thread_data->id);
   NVTX_POP_RANGE();
 
   HeTM_thread_data->isFirstChunk = 1;
@@ -371,6 +415,10 @@ static void cmpBlockApply()
   // printf("[%i] exit blocked\n", HeTM_thread_data->id);
   HeTM_thread_data->statusCMP = HETM_CMP_OFF;
   HeTM_thread_data->nbCmpLaunches = 0;
+
+  reachedTheEnd = 0; // reset
+  doneWithLog = 0;
+  __sync_add_and_fetch(&countDoneWithLog, -1);
 }
 
 static int launchCmpKernel(HeTM_thread_s *threadData, size_t wsetSize)
@@ -382,11 +430,14 @@ static int launchCmpKernel(HeTM_thread_s *threadData, size_t wsetSize)
   vecDev = (HeTM_CPULogEntry*)HeTM_shared_data.wsetLog;
   vecDev += tid*sizeBuffer; // each thread has a bit of the buffer
 
+  TIMER_READ(threadData->beforeCmpKernel);
+
   // PROBLEM --> the wsetSize is 0 because it was already copied
   if (HeTM_is_interconflict() || wsetSize == 0) {
     HETM_DEB_THRD_CPU("Thread %i decided not to CMP (isConfl=%i, wsetSize=%i)",
       threadData->id, HeTM_is_interconflict(), wsetSize);
     threadData->isCmpDone = 1; // TODO: put global
+    threadData->isCmpVoid = 1; // TODO: put global
     __sync_synchronize();
     return 0;
   }
@@ -421,10 +472,15 @@ static int launchCmpKernel(HeTM_thread_s *threadData, size_t wsetSize)
   dim3 blocksCheck(bo); // partition the stm_log by the different blocks
   dim3 threadsPerBlock(nbThreadsX); // each block has nbThreadsX threads
 
+  // if (wsetSize & 1) {
+  //   printf("invalid wsetSize=%i\n", wsetSize);
+  // }
+
   knlman_select("HeTM_checkTxCompressed");
   knlman_set_nb_blocks(bo, 1, 1);
   knlman_set_nb_threads(nbThreadsX, 1, 1);
   knlman_set_entry_object(&checkTxCompressed_args);
+  // threadData->didCallCmp = 1;
   knlman_run(threadData->stream);
   // -----------------------------------------------
 #elif HETM_CMP_TYPE == HETM_CMP_EXPLICIT
@@ -468,8 +524,13 @@ static int launchCmpKernel(HeTM_thread_s *threadData, size_t wsetSize)
 static void checkCmpDone()
 {
   if (HeTM_thread_data->isCmpDone) {
-    if (HeTM_thread_data->nbCmpLaunches >= HETM_MAX_CMP_KERNEL_LAUNCHES
-        || HeTM_is_interconflict()) {
+    // No limit for the number of rounds
+    if (/*HeTM_thread_data->nbCmpLaunches >= HETM_MAX_CMP_KERNEL_LAUNCHES
+        || */HeTM_is_interconflict()) {
+      if (!doneWithLog) {
+        doneWithLog = 1;
+        __sync_add_and_fetch(&countDoneWithLog, 1);
+      }
       HeTM_thread_data->statusCMP = HETM_CMP_BLOCK;
       __sync_synchronize();
     }
@@ -479,8 +540,8 @@ static void checkCmpDone()
 static void asyncGetInterConflFlag(void*)
 {
   if (!consecutiveFlagCpy) {
-    consecutiveFlagCpy = 1;
-    HeTM_set_is_interconflict(HeTM_get_inter_confl_flag());
+    consecutiveFlagCpy = 1; // TODO: memory barrier missing
+    HeTM_set_is_interconflict(HeTM_get_inter_confl_flag(HeTM_memStream));
   }
 }
 #endif /* HETM_LOG_TYPE != HETM_BMAP_LOG */

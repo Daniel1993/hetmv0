@@ -10,16 +10,18 @@ typedef int /*__attribute__((aligned (64)))*/ account_t;
 
 typedef struct bank {
   account_t *accounts;
+  account_t *devAccounts;
   long size;
 } bank_t;
 
 typedef struct memcd {
-  account_t *accounts;
-  int *version;
-  long size;
-  int ways;
-  int *version_bm;
-  int version_bm_size;
+	account_t *key;   /* keys in global memory */
+	account_t *val;   /* values in global memory */
+	account_t *ts;    /* last access TS in global memory */
+	account_t *state; /* state in global memory */
+	unsigned *globalTs;
+  long nbSets;
+  int nbWays;
 } memcd_t;
 
 typedef struct packet {

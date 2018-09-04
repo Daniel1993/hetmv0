@@ -25,8 +25,7 @@ __global__ void queue_generate_kernel(
 	int loop = 1;
 	int id = 0;
   id = threadIdx.x + blockDim.x*gridDim.y*blockIdx.x + blockIdx.y;
-	unsigned int * local = &queue[id*MEMCD_NB_TRANSFERS];
-
+	unsigned int *local = &queue[id*MEMCD_NB_TRANSFERS];
 
   #pragma unroll
 	for (int i = 0; i < MEMCD_NB_TRANSFERS; i++)
@@ -101,6 +100,7 @@ cudaError_t queue_Init(queue_t *q, cuda_t *cd, int shared_rate, int q_size, long
 	//Copy to host
   memman_select("memcd_cpu_queue");
   memman_cpy_to_cpu(NULL, NULL);
+  CUDA_CHECK_ERROR(cudaDeviceSynchronize(), ""); // waits copy back
   cd->gpu_queue = temp_q; // TODO:
 
 	/*
@@ -116,6 +116,7 @@ cudaError_t queue_Init(queue_t *q, cuda_t *cd, int shared_rate, int q_size, long
 	}
   memman_select("memcd_shared_queue");
   memman_cpy_to_cpu(NULL, NULL);
+  CUDA_CHECK_ERROR(cudaDeviceSynchronize(), "");
 
 	/*
 	 * GEN GPU QUEUE
@@ -130,6 +131,7 @@ cudaError_t queue_Init(queue_t *q, cuda_t *cd, int shared_rate, int q_size, long
 	}
   memman_select("memcd_gpu_queue");
   memman_cpy_to_cpu(NULL, NULL);
+  CUDA_CHECK_ERROR(cudaDeviceSynchronize(), "");
 
 	// cudaFree(temp_q); // TODO: temp_q is freed?
 

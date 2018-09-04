@@ -15,9 +15,42 @@
 // TODO: requires to compile HeTM with the correct set of flags
 #ifndef USE_TSX_IMPL
 // goes for TinySTM
-#define TM_START(tid, ro)     { stm_tx_attr_t _a = {{.id = tid, .read_only = ro}}; sigjmp_buf *_e = stm_start(_a); if (_e != NULL) sigsetjmp(*_e, 0)
-#define TM_LOAD(addr)         stm_load((stm_word_t *)addr)
-#define TM_STORE(addr, value) stm_store((stm_word_t *)addr, (stm_word_t)value)
+#define TM_START(tid, ro) { \
+  stm_tx_attr_t _a = {{.id = (unsigned int)tid, .read_only = (unsigned int)ro}}; \
+  sigjmp_buf *_e = stm_start(_a); \
+  if (_e != NULL) sigsetjmp(*_e, 0)
+
+// TODO: does assumptions on the machine --> PR-STM works with ints
+#define TM_LOAD(addr)         ({ \
+  uintptr_t _mask64Bits = (-1) << 3; \
+  uintptr_t _newAddr = (uintptr_t)(addr) & _mask64Bits; \
+  uintptr_t _loaded, _high, _low; \
+  int _res; \
+  _loaded = stm_load((stm_word_t *)_newAddr); \
+  _low = _loaded & (0xFFFFFFFFL); \
+  _high = (_loaded & (0xFFFFFFFFL << 32)) >> 32; \
+  if ((uintptr_t)(addr) & 0x4) \
+    _res = _high; \
+  else \
+    _res = _low; \
+  _res; \
+})
+
+#define TM_STORE(addr, value) ({ \
+  uintptr_t _mask64Bits = (-1) << 3; \
+  uintptr_t _newAddr = (uintptr_t)(addr) & _mask64Bits; \
+  uintptr_t _toStore, _high, _low; \
+  if ((uintptr_t)(addr) & 0x4) { \
+    _high = value & (0xFFFFFFFFL); \
+    _low = *((stm_word_t*)(_newAddr)) & (0xFFFFFFFFL); /* 32 bits */ \
+  } else { \
+    _high = (*((stm_word_t*)(_newAddr)) & (0xFFFFFFFFL << 32)) >> 32; \
+    _low = value & (0xFFFFFFFFL); \
+  } \
+  _toStore = (_high << 32) | _low; \
+  stm_store((stm_word_t *)(_newAddr), (stm_word_t)_toStore); \
+})
+
 #define TM_COMMIT             stm_commit(); }
 
 #define TM_GET_LOG(p)         p = stm_thread_local_log

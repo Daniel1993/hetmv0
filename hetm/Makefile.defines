@@ -3,6 +3,7 @@ PR_MAX_RWSET_SIZE ?= 2
 CMP_TYPE          ?= COMPRESSED
 LOG_TYPE          ?= VERS
 PROFILE           ?= 0
+OLD_BMAP_IMPL     ?= 0
 
 SYS_CPU_MAX_FREQ=$(shell cat /sys/devices/system/cpu/cpu0/cpufreq/cpuinfo_max_freq)
 SYS_CPU_NB_CORES=$(shell cat /proc/cpuinfo | grep processor | wc -l)
@@ -14,6 +15,18 @@ DEFINES += \
 
 ifeq ($(DISABLE_CHUNKS),1)
 DEFINES += -DHETM_DISABLE_CHUNKS=1
+endif
+
+ifeq ($(OVERLAP_CPY_BACK),1)
+DEFINES += -DHETM_OVERLAP_CPY_BACK=1
+endif
+
+ifeq ($(DISABLE_NON_BLOCKING),1)
+DEFINES += -DDISABLE_NON_BLOCKING=1
+endif
+
+ifeq ($(OLD_BMAP_IMPL),1)
+DEFINES += -DHETM_OLD_BMAP_IMPL
 endif
 
 ############

@@ -15,13 +15,13 @@
 #define HETM_VERS2_LOG 4
 
 #if HETM_LOG_TYPE == HETM_VERS2_LOG
-#define LOG_ACTUAL_SIZE      8191 /* closest Prime number 8191 */
-#define LOG_GPU_THREADS      8192 /* 256*32 */
-#define LOG_THREADS_IN_BLOCK 64
-#define LOG_SIZE             16
-#define STM_LOG_BUFFER_SIZE  1 /* buffer capacity (times LOG_SIZE) */
+#define LOG_ACTUAL_SIZE      4093 // 8191 /* closest Prime number */
+#define LOG_GPU_THREADS      4096 // 8192 /* LOG_THREADS_IN_BLOCK*... */
+#define LOG_THREADS_IN_BLOCK 128
+#define LOG_SIZE             32
+#define STM_LOG_BUFFER_SIZE  4 /* buffer capacity (times LOG_SIZE) */
 #else /* !HETM_VERS2_LOG */
-#define LOG_SIZE             65536 // 131072 /* Initial log size */
+#define LOG_SIZE             32768 // 32768 // 65536 // 131072 /* Initial log size */
 #define STM_LOG_BUFFER_SIZE  4 /* buffer capacity (times LOG_SIZE) */
 #endif /* HETM_VERS2_LOG */
 
@@ -31,13 +31,13 @@
 
 #if HETM_LOG_TYPE == HETM_VERS_LOG || HETM_LOG_TYPE == HETM_VERS2_LOG
 typedef struct HeTM_CPULogEntry_t {
-  long *pos;       /* Address written to */
-  long val;        /* Value Written      */
-  long time_stamp; /* Version counter    */
-} HeTM_CPULogEntry;
+  volatile uint32_t pos;         /* Address written to --> offset */
+  volatile uint32_t time_stamp;  /* Version counter    */
+  volatile int32_t  val;              /* Value Written      */
+} __attribute__((packed)) HeTM_CPULogEntry; // in the GPU does not work!
 #elif HETM_LOG_TYPE == HETM_ADDR_LOG
 typedef struct HeTM_CPULogEntry_t {
-  long *pos;       /* Address written to */
+  int *pos;       /* Address written to */
 } HeTM_CPULogEntry;
 #else
 // no log entries
@@ -53,9 +53,9 @@ extern __thread HETM_LOG_T *stm_thread_local_log;
 
 extern void *stm_devMemPoolBackupBmap;
 extern void *stm_baseMemPool;
-#if HETM_LOG_TYPE == HETM_BMAP_LOG
-extern void *stm_wsetCPU;
-#endif
+extern void *stm_wsetCPU; // only for HETM_BMAP_LOG
+extern void *stm_wsetCPUCache; // only for HETM_BMAP_LOG
+extern size_t stm_wsetCPUCacheBits; // only for HETM_BMAP_LOG
 
 /* ################################################################### *
  * inline FUNCTIONS
@@ -119,15 +119,15 @@ static inline void stm_log_free(HETM_LOG_T *log)
 #else
     CHUNKED_LOG_DESTROY(log);
 #endif
-    CHUNKED_LOG_TEARDOWN(); // deletes the freed nodes
   }
+  // CHUNKED_LOG_TEARDOWN(); // TODO: implement thread-local chunk_nodes
   stm_thread_local_log = NULL;
 }
 
 // TODO: keep this inline for performance reasons
 /* Add value to log */
 static inline int
-stm_log_newentry(HETM_LOG_T *log, long *pos, int val, long vers)
+stm_log_newentry(HETM_LOG_T *log, long* volatile pos, int volatile val, long vers)
 {
 #if !defined(HETM_DISABLE_CHUNKS) && HETM_LOG_TYPE != HETM_VERS_LOG && HETM_LOG_TYPE != HETM_VERS2_LOG
   memman_access_addr(stm_devMemPoolBackupBmap, pos);
@@ -138,30 +138,47 @@ stm_log_newentry(HETM_LOG_T *log, long *pos, int val, long vers)
   // set bitmap
   // TODO: 2 ==> PR_LOCK_GRAN_BITS
   memman_access_addr_gran(stm_wsetCPU, stm_baseMemPool, pos, 1, 2);
+  memman_access_addr_gran(stm_wsetCPUCache, stm_baseMemPool, pos, 1, (2+stm_wsetCPUCacheBits));
 
   /* ********************************************** */
 #else /* HETM_LOG_TYPE != HETM_BMAP_LOG */
   /* ********************************************** */
   // add entry in log
 
-  HeTM_CPULogEntry entry;
 #if HETM_LOG_TYPE == HETM_VERS_LOG || HETM_LOG_TYPE == HETM_VERS2_LOG
-  entry.pos        = pos;
-  entry.val        = val;
-  entry.time_stamp = vers;
+  uintptr_t base_addr = (uintptr_t)stm_baseMemPool;
+  uintptr_t pos_addr = (uintptr_t)pos;
+  uintptr_t pos_idx;
+  base_addr >>= 2; // 32 bits --> remove the offset within a word
+  pos_addr >>= 2;
+
+  pos_idx = ((pos_addr - base_addr) + 1);
+
+  // the 0 is the default value for empty
+  // printf("val = %i\n", val);
+  volatile HeTM_CPULogEntry entry = {
+    .pos = (uint32_t) pos_idx,
+    .time_stamp = (uint32_t)vers,
+    .val = (int32_t)val,
+  };
+  // entry.val        = val;
+  // entry.pos        = (pos_addr - base_addr) + 1; // just the offset, WARN: assumption on address space layout
+  // entry.time_stamp = (uint32_t)vers; // WARN: may wrap around very often
 #elif HETM_LOG_TYPE == HETM_ADDR_LOG
-  entry.pos = pos;
+  volatile HeTM_CPULogEntry entry;
+  entry.pos = (int*)pos;
 #endif /* HETM_LOG_TYPE == HETM_VERS_LOG */
 
 #if HETM_LOG_TYPE == HETM_VERS2_LOG
 // TODO: sizeof(PR_GRANULE_T)
   uintptr_t wordAddr = ((uintptr_t)pos) / sizeof(int);
   MOD_CHUNKED_LOG_APPEND(log, (void*)&entry, wordAddr);
-#else
+#else /* HETM_VERS_LOG */
+// 0 size logs
   CHUNKED_LOG_APPEND(log, (void*)&entry);
-#endif
+#endif /* HETM_LOG_TYPE == HETM_VERS2_LOG */
 
-#endif /* HETM_LOG_TYPE == HETM_VERS_LOG */
+#endif /* HETM_LOG_TYPE == HETM_BMAP_LOG */
   return 1;
 }
 

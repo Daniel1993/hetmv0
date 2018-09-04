@@ -131,10 +131,6 @@
 	memman_free_dual();*/ /* TODO: clean this memory */ \
 }) \
 
-#ifdef PR_AFTER_VAL_LOCKS_EXT
-#undef PR_AFTER_VAL_LOCKS_EXT
-#endif
-
 // Logs the read-set after acquiring the locks
 // TODO: check write/write conflicts
 
@@ -152,17 +148,20 @@
 (int)explicitLogOffset, (int)GPU_log->explicitLogOffThr[tid_], i);*/ \
 #elif HETM_CMP_TYPE == HETM_CMP_COMPRESSED
 #define SET_ON_LOG(addr) \
-	uintptr_t rsetAddr = (uintptr_t)(addr); \
-	uintptr_t devBAddr = (uintptr_t)GPU_log->devMemPoolBasePtr; \
-	uintptr_t pos = (rsetAddr - devBAddr) >> PR_LOCK_GRAN_BITS; \
-	unsigned short *RSetBitmap = (unsigned short*)GPU_log->dev_rset; \
-	ByteM_SET_POS(pos, RSetBitmap) \
+	uintptr_t _rsetAddr = (uintptr_t)(addr); \
+	uintptr_t _devBAddr = (uintptr_t)GPU_log->devMemPoolBasePtr; \
+	uintptr_t _pos = (_rsetAddr - _devBAddr) >> PR_LOCK_GRAN_BITS; \
+	unsigned short *_RSetBitmap = (unsigned short*)GPU_log->dev_rset; \
+	ByteM_SET_POS(_pos, _RSetBitmap) \
 //
 #else
 // error or disabled
 #define SET_ON_LOG(addr) /* empty */
 #endif
 
+#ifdef PR_AFTER_VAL_LOCKS_EXT
+#undef PR_AFTER_VAL_LOCKS_EXT
+#endif
 #define PR_AFTER_VAL_LOCKS_EXT(args) ({ \
   int i; \
 	HeTM_GPU_log_s *GPU_log = (HeTM_GPU_log_s*)args->pr_args_ext; \
@@ -171,7 +170,10 @@
 	/* ---------------------- */ \
 	for (i = 0; i < args->rset.size; i++) { \
 		SET_ON_LOG(args->rset.addrs[i]); /* add read to devLogR */ \
-		memman_access_addr_dev(GPU_log->bmap, args->rset.addrs[i]); \
+		/*memman_access_addr_dev(GPU_log->bmap, args->rset.addrs[i]);*/ \
+	} \
+	for (i = 0; i < args->wset.size; i++) { \
+		memman_access_addr_dev(GPU_log->bmap, args->wset.addrs[i]); \
 	} \
 	/* TODO: explicit logOnly */ \
 	HeTM_GPU_log_explicit_after_reads /* offset of the next transaction */ \
@@ -183,7 +185,10 @@
 #endif
 
 // Logs the GPU write-set after acquiring the locks
-#define PR_AFTER_WRITEBACK_EXT(args, i, addr, val) ({ /* TODO: not implemented */ }) \
+#define PR_AFTER_WRITEBACK_EXT(args, i, addr, val) ({ \
+	/* TODO: not implemented */ \
+	/* HeTM_GPU_log_s *GPU_log = (HeTM_GPU_log_s*)args->pr_args_ext;*/ \
+}) \
 
 #define PR_i_rand(args, n) ({ \
 	HeTM_GPU_log_s *GPU_log = (HeTM_GPU_log_s*)args.pr_args_ext; \

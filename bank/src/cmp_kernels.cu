@@ -120,7 +120,7 @@ __global__ void HeTM_knl_finalTxLog2(HeTM_knl_finalTxLog2_s args)
 		save = devLogR[id];
 
 		//Save to compressed log
-		if (save>1)
+		if (save > 1)
 			global_bitmap[pos] = save;
 	}
 }

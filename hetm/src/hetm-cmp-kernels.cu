@@ -23,9 +23,91 @@ size_t HeTM_get_explicit_log_block_size()
 
 // HETM_BMAP_LOG requires a specific kernel
 
-__global__ void HeTM_knl_checkTxBitmap(HeTM_knl_cmp_args_s args)
+__global__ void HeTM_knl_checkTxBitmapCache(HeTM_knl_cmp_args_s args)
 {
   int id = blockIdx.x*blockDim.x+threadIdx.x;
+
+  // TODO: these must be the same
+  int sizeWSet = args.sizeWSet; /* Size of the entire log */
+  // int sizeRSet = args.sizeRSet; /* Size of the device log */
+
+  if (id >= sizeWSet) return; // the thread has nothing to do
+
+  unsigned char *rset = (unsigned char*)HeTM_knl_global.devRSet;
+  unsigned char *wset = (unsigned char*)HeTM_knl_global.hostWSetCache;
+  size_t wsetBits = HeTM_knl_global.hostWSetCacheBits;
+  // PR_GRANULE_T *a = (PR_GRANULE_T*)HeTM_knl_global.devMemPoolBasePtr;
+  // PR_GRANULE_T *b = (PR_GRANULE_T*)HeTM_knl_global.devMemPoolBackupBasePtr;
+
+  // TODO: use shared memory
+  int cacheId = id >> wsetBits;
+  unsigned char isNewWrite = wset[cacheId];
+  unsigned char isConfl = rset[id] && isNewWrite;
+
+  if (isConfl) {
+    *HeTM_knl_global.isInterConfl = 1;
+    ((unsigned char*)(HeTM_knl_global.hostWSetCacheConfl))[cacheId] = 1;
+  }
+  // if (isNewWrite) {
+  //   a[id] = b[id];
+  // }
+}
+
+__global__ void HeTM_knl_checkTxBitmap(HeTM_knl_cmp_args_s args, size_t offset)
+{
+  int id = blockIdx.x*blockDim.x+threadIdx.x;
+  int idPlusOffset = id + offset;
+
+  // TODO: these must be the same
+  int sizeWSet = args.sizeWSet; /* Size of the host log */
+  // int sizeRSet = args.sizeRSet; /* Size of the device log */
+
+  if (idPlusOffset >= sizeWSet) return; // the thread has nothing to do
+
+  unsigned char *rset = (unsigned char*)HeTM_knl_global.devRSet;
+  unsigned char *wset = (unsigned char*)HeTM_knl_global.hostWSet;
+  // PR_GRANULE_T *a = (PR_GRANULE_T*)HeTM_knl_global.devMemPoolBasePtr;
+  // PR_GRANULE_T *b = (PR_GRANULE_T*)HeTM_knl_global.devMemPoolBackupBasePtr;
+
+  // TODO: use shared memory
+  unsigned char isNewWrite = wset[idPlusOffset];
+  unsigned char isConfl = rset[idPlusOffset] && isNewWrite;
+
+  if (isConfl) {
+    *HeTM_knl_global.isInterConfl = 1;
+  }
+  // if (isNewWrite) {
+  //   a[id] = b[id];
+  // }
+}
+
+__global__ void HeTM_knl_checkTxBitmap_Explicit(HeTM_knl_cmp_args_s args)
+{
+  int id = blockIdx.x*blockDim.x+threadIdx.x;
+  int sizeRSet = args.sizeRSet / sizeof(PR_GRANULE_T);
+  unsigned char *wset = (unsigned char*)HeTM_knl_global.hostWSet; /* Host log */
+  int *devLogR = (int*)HeTM_knl_global.devRSet;  /* GPU read log */
+  int jobSize = sizeRSet / (blockDim.x*gridDim.x);
+  size_t GPUIndexMaxVal = HeTM_knl_global.nbGranules;
+  int i;
+  jobSize++; // --> case mod is not zero
+  for (i = 0; i < jobSize; ++i) {
+    // TODO: review formula
+    int idRSet = id*jobSize + i;
+    if (idRSet >= sizeRSet || *HeTM_knl_global.isInterConfl) {
+      return;
+    }
+    int GPUIndex = devLogR[idRSet] - 1;
+    // TODO
+    if (GPUIndex > -1 && GPUIndex < GPUIndexMaxVal && wset[GPUIndex] == 1) {
+      *HeTM_knl_global.isInterConfl = 1;
+    }
+  }
+}
+
+__global__ void HeTM_knl_writeTxBitmap(HeTM_knl_cmp_args_s args, size_t offset)
+{
+  int id = blockIdx.x*blockDim.x+threadIdx.x + offset;
 
   // TODO: these must be the same
   int sizeWSet = args.sizeWSet; /* Size of the host log */
@@ -33,21 +115,24 @@ __global__ void HeTM_knl_checkTxBitmap(HeTM_knl_cmp_args_s args)
 
   if (sizeWSet < id) return; // the thread has nothing to do
 
-  unsigned char *rset = (unsigned char*)HeTM_knl_global.devRSet;
+  // unsigned char *rset = (unsigned char*)HeTM_knl_global.devRSet;
   unsigned char *wset = (unsigned char*)HeTM_knl_global.hostWSet;
   PR_GRANULE_T *a = (PR_GRANULE_T*)HeTM_knl_global.devMemPoolBasePtr;
   PR_GRANULE_T *b = (PR_GRANULE_T*)HeTM_knl_global.devMemPoolBackupBasePtr;
 
   // TODO: use shared memory
   unsigned char isNewWrite = wset[id];
-  unsigned char isConfl = rset[id] && isNewWrite;
 
-  if (isConfl) {
-    *HeTM_knl_global.isInterConfl = 1;
-  }
-  if (isNewWrite) {
-    a[id] = b[id];
-  }
+  long condToIgnore = !isNewWrite;
+  condToIgnore = ((condToIgnore | (-condToIgnore)) >> 63);
+  // long maskIgnore = -condToIgnore;
+  long maskIgnore = condToIgnore; // TODO: for some obscure reason this is -1
+
+  // applies -1 if address is invalid OR the index if valid
+  a[id] = (maskIgnore & a[id]) | ((~maskIgnore) & b[id]);
+  // if (isNewWrite) {
+  //   a[id] = b[id];
+  // }
 }
 
 #else /* HETM_LOG_TYPE != HETM_BMAP_LOG */
@@ -132,7 +217,7 @@ __global__ void HeTM_knl_checkTxExplicit(HeTM_knl_cmp_args_s args)
   if (idWSet >= sizeWSet) return;
 
   int i;
-for (i = 0; i < blockDim.y; ++i) {
+  for (i = 0; i < blockDim.y; ++i) {
     int idRSetWarp = (idRSet + CMP_EXPLICIT_THRS_PER_WSET*i) % threadsPerRSetBlock;
     int GPU_index = sharedRSet[idRSetWarp]; /* TODO: use __shfl */
 
@@ -143,57 +228,8 @@ for (i = 0; i < blockDim.y; ++i) {
   }
 
   if (*HeTM_knl_global.isInterConfl == 0) {
-    // TODO: apply to global memory (expensive here)
+    // TODO
     // applyHostWritesOnDev(fetch_stm, GPU_addr, index);
-  }
-}
-
-__device__ void applyHostWritesOnDev(
-  HeTM_CPULogEntry *fetch_stm, uintptr_t GPU_addr, int index
-) {
-  int flag = 1;
-
-  while (flag && fetch_stm && !(*HeTM_knl_global.isInterConfl)) {
-    /* */
-    //- TODO: refactor!
-#if HETM_LOG_TYPE == HETM_VERS_LOG
-    long *vers = (long*)HeTM_knl_global.versions;
-    PR_GRANULE_T *a = (PR_GRANULE_T*)HeTM_knl_global.devMemPoolBasePtr;
-    int *mutex = HeTM_knl_global.PRLockTable;
-    int *mux     = (int*)&(PR_GET_MTX(mutex, GPU_addr));
-    int val      = *mux; // atomic read
-    int isLocked = PR_CHECK_LOCK(val) || PR_CHECK_PRELOCK(val);
-
-    if (isLocked) continue;
-
-    int pr_version = PR_GET_VERSION(val);
-    int pr_owner   = PR_GET_OWNER(val);
-    int lockVal    = PR_LOCK_VAL(pr_version, pr_owner);
-    if (atomicCAS(mux, val, lockVal) == val) { // LOCK
-      // if the comming write is more recent apply, if not ignore
-      if (fetch_stm->time_stamp > vers[index]) {
-        a[index] = fetch_stm->val;
-        vers[index] = fetch_stm->time_stamp; // set GPU version
-      }
-      atomicCAS(mux, lockVal, 0); // UNLOCK
-      flag = 0; // break;
-    } else {
-      // in-GPU account is fresher
-      if (fetch_stm->time_stamp <= vers[index]) {
-        flag = 0; // break;
-      }
-    }
-#elif HETM_LOG_TYPE == HETM_ADDR_LOG
-    char *vers = (char*)HeTM_knl_global.versions;
-    // TODO: doesn't work! there is some bug here!
-    // int mod = index & 0b11;
-    // int div = index >> 2;
-    // int res = 1 << mod;
-    // atomicOr((int*)&(vers[div<<2]), res);
-    vers[index] = 1; // in a final kernel merge with CPU dataset
-    flag = 0; // break;
-#endif
-    /* */
   }
 }
 
@@ -224,97 +260,114 @@ __device__ void checkTx_versionLOG(int sizeWSet, int entries_per_thread)
 
   // TODO: init shared memory with default value (if default is not changed
   // then do not copy to global memory) (CRASHES!)
-  const int maxCache = LOG_SIZE*64; // TODO: use shared 64*32 (128 threads each thread handles 32 tops)
+  const int maxCache = LOG_SIZE*LOG_THREADS_IN_BLOCK; // TODO: use shared 64*32 (128 threads each thread handles 32 tops)
   __shared__ long cacheVersion[maxCache]; // NEED ADDRESS!!!!
   __shared__ int cacheValue[maxCache];
-  __shared__ long cacheAddr[maxCache]; // if not enough space go for private mem
-
-  // int cachePos = threadIdx.x;
-  // int cacheBlockLen = blockDim.x;
+  // __shared__ long cacheAddr[maxCache]; // if not enough space go for private mem
 
   // ---------------------------------------------------------------
   // read from Global Memory
   #pragma unroll
   for (i = 0; i < LOG_SIZE; ++i) { // entries_per_thread == 16
-    fetch_stm = &(stm_log[id + i*LOG_ACTUAL_SIZE]);
-    uintptr_t CPU_addr = (uintptr_t)fetch_stm->pos;
-    uintptr_t DTST_offset = CPU_addr - (uintptr_t)HeTM_knl_global.hostMemPoolBasePtr;
-    // uintptr_t GPU_addr = DTST_offset + (uintptr_t)a;
-    long index = DTST_offset >> PR_LOCK_GRAN_BITS;
-    long condToIgnore = CPU_addr == 0 || CPU_addr == (uintptr_t)-1;
-    condToIgnore = (condToIgnore | (-condToIgnore)) >> 63;
-    long maskIgnore = -condToIgnore;
-    cacheAddr[threadIdx.x + i*blockDim.x] = index;
-
-    // applies -1 if address is invalid OR the index if valid
-    // cacheAddr[threadIdx.x + i*blockDim.x] = (maskIgnore & (long)-1L) | ((~maskIgnore) & index);
-    if (index == -1 || fetch_stm->pos == 0) {
-      cacheAddr[threadIdx.x + i*blockDim.x] = -1;
-    }
-
-    // if (CPU_addr == 0 || CPU_addr == (uintptr_t)-1) {
-    //   cacheAddr[threadIdx.x + i*blockDim.x] = -1; // TODO!
-    // } else {
-    //   cacheAddr[threadIdx.x + i*blockDim.x] = index;
+    cacheVersion[threadIdx.x + i*blockDim.x] = 0; // default version (apply always)
+    // cacheAddr[threadIdx.x + i*blockDim.x] = index;
+    // if (CPU_addr == (uintptr_t)-1 || CPU_addr == 0) {
+    //   cacheAddr[threadIdx.x + i*blockDim.x] = -1;
     // }
   }
   __syncthreads();
   // ---------------------------------------------------------------
 
   #pragma unroll
-  for (i = 0; i < entries_per_thread; ++i) { // entries_per_thread == 16 (else crashes)
+  for (i = 0; i < LOG_SIZE; ++i) { // entries_per_thread == 16 (else crashes)
     fetch_stm = &(stm_log[id + i*LOG_ACTUAL_SIZE]);
-    long index = cacheAddr[threadIdx.x + i*blockDim.x];
+
+    // -------------------------------------------------------------
+    // Compute index
+    // uintptr_t CPU_addr = (uintptr_t)fetch_stm->pos; // TODO: now this is an offset
+    // uintptr_t DTST_offset = CPU_addr - (uintptr_t)HeTM_knl_global.hostMemPoolBasePtr;
+    // uintptr_t GPU_addr = DTST_offset + (uintptr_t)a;
+    // long index = DTST_offset >> PR_LOCK_GRAN_BITS;
+    long index = fetch_stm->pos;
+    // long condToIgnore = (CPU_addr == 0 || CPU_addr == (uintptr_t)-1);
+    long condToIgnore = (index == 0); // 0 is default value for empty
+    condToIgnore = ((condToIgnore | (-condToIgnore)) >> 63);
+    // long maskIgnore = -condToIgnore;
+    long maskIgnore = condToIgnore; // TODO: for some obscure reason this is -1
+
+    // applies -1 if address is invalid OR the index if valid
+    index = (maskIgnore & (long)-1L) | ((~maskIgnore) & (index-1));
+    // -------------------------------------------------------------
+
     // if ((*HeTM_knl_global.isInterConfl) == 1) return;
-    if (fetch_stm->pos == 0 || index == -1) break; // TODO: repeat the access to avoid if's in the next loop
-    if (index > 10000) {
-      printf("cacheAddr[idx]=%li fetch_stm->pos=%p DTST_offset=%li\n",
-        cacheAddr[threadIdx.x + i*blockDim.x], fetch_stm->pos,
-        (uintptr_t)fetch_stm->pos - (uintptr_t)HeTM_knl_global.hostMemPoolBasePtr);
-    }
 
-    int fetch_gpu = 0; //ByteM_GET_POS(index, logBM);
+    long condIsIndexMinus1 = (index == -1);
+    long accessInByteMap = ((condIsIndexMinus1 | (-condIsIndexMinus1)) >> 63);
+    // fixedIndex for invalid entries --> 0 TS and val
+    long fixedIndex = ((~accessInByteMap) & index); // 0 or index
+    // if (index == -1) break;
 
-    isInterConfl = fetch_gpu || isInterConfl;
+    int fetch_gpu = ByteM_GET_POS(fixedIndex, logBM);
 
-    // --------------------
-    // TODO: index in cache (CRASHES)
-    // uintptr_t posInCache = index / cacheBlockLen + index % cacheBlockLen;
-    // --------------------
+    isInterConfl = (fetch_gpu && !condIsIndexMinus1) || isInterConfl;
 
-    // TODO: use Aleksandar formulas
-    // if (fetch_stm->time_stamp > cacheVersion[id*i])
-    //   then apply new value
-    //   else leave old value
-    // ---------------------------------------------------------------
-    long ts = fetch_stm->time_stamp;
-    long cacheTs  = 0; //vers[index];
-    long cacheVal = 0; //a[index];
-
-    long condToApply = ts > cacheTs; // 0 or 1
-    condToApply = (condToApply | (-condToApply)) >> 63;
-    // 0 (all bits 0, means keep prev) or -1 (all bits 1, means keep next)
-    long maskApply = -condToApply;
-
-    cacheVersion[threadIdx.x + i*blockDim.x] = ((~maskApply) & cacheTs) | (maskApply & ts);
-    cacheValue[threadIdx.x + i*blockDim.x] = ((~maskApply) & cacheVal) | (maskApply & fetch_stm->val);
     // ---------------------------------------------------------------
     // if (ts > cacheTs) {
     //   cacheVersion[threadIdx.x + i*blockDim.x] = fetch_stm->time_stamp;
     //   cacheValue[threadIdx.x + i*blockDim.x] = fetch_stm->val;
     // }
     // ---------------------------------------------------------------
+    long cacheTs  = vers[fixedIndex];
+    long cacheVal = a[fixedIndex];
+
+    long condToApply = (fetch_stm->time_stamp > cacheTs); // 0 or 1
+    condToApply = (condToApply | (-condToApply)) >> 63;
+    // 0 (all bits 0, means keep prev) or -1 (all bits 1, means keep next)
+    // long maskApply = -condToApply;
+    long maskApply = condToApply; // TODO: for some obscure reason this is -1
+
+    // invalid entries, last value is applied
+    cacheVersion[threadIdx.x + i*blockDim.x] = ((~maskApply) & cacheTs) | (maskApply & fetch_stm->time_stamp);
+    cacheValue[threadIdx.x + i*blockDim.x] = ((~maskApply) & cacheVal) | (maskApply & fetch_stm->val);
+    // ---------------------------------------------------------------
   }
 
   // ---------------------------------------------------------------
   __syncthreads();
   #pragma unroll
   for (i = 0; i < LOG_SIZE; ++i) { // entries_per_thread == 16
-    long assumed, old;
-    int oldVal;
-    long index = cacheAddr[threadIdx.x + i*blockDim.x];
-    if (index == -1) break;
+    fetch_stm = &(stm_log[id + i*LOG_ACTUAL_SIZE]);
 
+    // -------------------------------------------------------------
+    // Compute index
+    uintptr_t CPU_addr = (uintptr_t)fetch_stm->pos;
+    uintptr_t DTST_offset = CPU_addr - (uintptr_t)HeTM_knl_global.hostMemPoolBasePtr;
+    // uintptr_t GPU_addr = DTST_offset + (uintptr_t)a;
+    long index = DTST_offset >> PR_LOCK_GRAN_BITS;
+    long condToIgnore = (CPU_addr == 0 || CPU_addr == (uintptr_t)-1);
+    condToIgnore = ((condToIgnore | (-condToIgnore)) >> 63);
+    // long maskIgnore = -condToIgnore;
+    long maskIgnore = condToIgnore; // TODO: for some obscure reason this is -1
+
+    // applies -1 if address is invalid OR the index if valid
+    index = (maskIgnore & (long)-1L) | ((~maskIgnore) & index);
+
+    // long index = cacheAddr[threadIdx.x + i*blockDim.x];
+    // if (index == -1) break;
+
+    long condIsIndexMinus1 = (index == -1);
+    long accessInByteMap = ((condIsIndexMinus1 | (-condIsIndexMinus1)) >> 63);
+    long fixedIndex = ((~accessInByteMap) & index);
+
+    // TODO: concurrent kernels!!!
+    // if(fixedIndex < 0 || fixedIndex > HeTM_knl_global.nbGranules) {
+    //   printf("invalid: index=%li, pos=%p\n", fixedIndex, (void*)CPU_addr);
+    // }
+    vers[fixedIndex] = cacheVersion[threadIdx.x + i*blockDim.x];
+    a[fixedIndex] = cacheValue[threadIdx.x + i*blockDim.x];
+
+    // long assumed, old;
+    // int oldVal;
     // oldVal = a[index]; // TODO: this one is tricky --> is it atomic?
     // old = vers[index];
     // do {
@@ -355,22 +408,73 @@ __device__ void checkTx_versionLOG(int sizeWSet, int sizeRSet)
     // Find the bitmap index for the CPU access
     // HeTM_hostMemPoolBasePtr is the base address of the bank accounts
     // fetch_stm->pos is the CPU address (then converted to an index)
-    CPU_addr = (uintptr_t)fetch_stm->pos;
+    // CPU_addr = (uintptr_t)fetch_stm->pos;
+    index = fetch_stm->pos;
 
-    if (CPU_addr == 0) return; // not defined
+    if (index == 0) return; // not defined
 
-    offset   = CPU_addr - (uintptr_t)HeTM_knl_global.hostMemPoolBasePtr;
-    GPU_addr = offset + (uintptr_t)a; // TODO: change the name "a" to accounts
-    index    = offset >> PR_LOCK_GRAN_BITS;
+    index -= 1; // 0 is default value for empty
+
+    // offset   = CPU_addr - (uintptr_t)HeTM_knl_global.hostMemPoolBasePtr;
+    // GPU_addr = offset + (uintptr_t)a; // TODO: change the name "a" to accounts
+    GPU_addr = (uintptr_t)&(a[index]); // TODO: change the name "a" to accounts
+    // index    = offset >> PR_LOCK_GRAN_BITS;
     fetch_gpu = ByteM_GET_POS(index, logBM); //logBM[index];
 
     if (fetch_gpu != 0) {
       // CPU and GPU conflict in some address
+      printf("found confl on index=%i\n", index);
       *HeTM_knl_global.isInterConfl = 1;
     }
 
     applyHostWritesOnDev(fetch_stm, GPU_addr, index);
   }
+}
+
+__device__ void applyHostWritesOnDev(
+  HeTM_CPULogEntry *fetch_stm, uintptr_t GPU_addr, int index
+) {
+#if HETM_LOG_TYPE == HETM_VERS_LOG
+  while (fetch_stm && !(*HeTM_knl_global.isInterConfl)) {
+    /* */
+    //- TODO: refactor!
+    long *vers = (long*)HeTM_knl_global.versions;
+    PR_GRANULE_T *a = (PR_GRANULE_T*)HeTM_knl_global.devMemPoolBasePtr;
+    int *mutex = HeTM_knl_global.PRLockTable;
+    int *mux     = (int*)&(PR_GET_MTX(mutex, GPU_addr));
+    int val      = *mux; // atomic read
+    int isLocked = PR_CHECK_LOCK(val) || PR_CHECK_PRELOCK(val);
+
+    if (isLocked) continue;
+
+    int pr_version = PR_GET_VERSION(val);
+    int pr_owner   = PR_GET_OWNER(val);
+    int lockVal    = PR_LOCK_VAL(pr_version, pr_owner);
+    if (atomicCAS(mux, val, lockVal) == val) { // LOCK
+      // if the comming write is more recent apply, if not ignore
+      if (fetch_stm->time_stamp > vers[index]) {
+        // int read = a[index];
+        // if (atomicCAS(&a[index], read, fetch_stm->val) != read) {
+        //   printf(" >>>> Error! concurrent access!\n");
+        // }
+        a[index] = fetch_stm->val; // TODO: apply is changing bank invariant!
+        vers[index] = fetch_stm->time_stamp; // set GPU version
+      }
+      atomicCAS(mux, lockVal, 0); // UNLOCK
+      break;
+    } else if (fetch_stm->time_stamp <= vers[index]) {
+      break;
+    }
+  }
+#elif HETM_LOG_TYPE == HETM_ADDR_LOG
+  char *vers = (char*)HeTM_knl_global.versions;
+  // TODO: doesn't work! there is some bug here!
+  // int mod = index & 0b11;
+  // int div = index >> 2;
+  // int res = 1 << mod;
+  // atomicOr((int*)&(vers[div<<2]), res);
+  vers[index] = 1; // in a final kernel merge with CPU dataset
+#endif
 }
 #endif /* HETM_LOG_TYPE == HETM_VERS2_LOG */
 
@@ -381,4 +485,5 @@ void HeTM_set_global_arg(HeTM_knl_global_s arg)
   CUDA_CHECK_ERROR(
     cudaMemcpyToSymbol(HeTM_knl_global, &arg, sizeof(HeTM_knl_global_s)),
     "");
+  // printf("HeTM_knl_global.hostWSet = %p\n", HeTM_knl_global.hostWSet);
 }

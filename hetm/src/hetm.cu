@@ -66,6 +66,7 @@ int HeTM_init(HeTM_init_s init)
 #if HETM_LOG_TYPE != HETM_BMAP_LOG
   knlman_create("HeTM_checkTxCompressed", run_checkTxCompressed, 0);
   knlman_create("HeTM_checkTxExplicit", run_checkTxExplicit, 0);
+  knlman_select("HeTM_checkTxExplicit");
 #endif /* HETM_LOG_TYPE != HETM_BMAP_LOG */
 
   PR_init(); // inits PR-STM mutex array
@@ -95,14 +96,14 @@ int HeTM_destroy()
   return 0;
 }
 
-int HeTM_get_inter_confl_flag() {
+int HeTM_get_inter_confl_flag(void *stream) {
   if (*HeTM_shared_data.hostInterConflFlag) {
     // does not need to copy again (conflict detected already)
     return 1;
   }
   memman_select("HeTM_interConflFlag");
-  memman_cpy_to_cpu(HeTM_memStream, NULL);
-  cudaStreamSynchronize((cudaStream_t)HeTM_memStream);
+  memman_cpy_to_cpu(stream, NULL);
+  cudaStreamSynchronize((cudaStream_t)stream);
   return *HeTM_shared_data.hostInterConflFlag;
 }
 
@@ -150,6 +151,7 @@ static void run_checkTxCompressed(knlman_callback_params_s params)
   HeTM_thread_s *threadData = (HeTM_thread_s*)data->clbkArgs;
 
   CUDA_EVENT_RECORD(threadData->cmpStartEvent, stream);
+  threadData->didCallCmp = 1;
 #if HETM_LOG_TYPE == HETM_VERS2_LOG
   // inits 32kB of shared memory
   HeTM_knl_checkTxCompressed<<<blocks, threads, 0, stream>>>(data->knlArgs);
@@ -157,10 +159,10 @@ static void run_checkTxCompressed(knlman_callback_params_s params)
   HeTM_knl_checkTxCompressed<<<blocks, threads, 0, stream>>>(data->knlArgs);
 #endif
   CUDA_EVENT_RECORD(threadData->cmpStopEvent, stream);
-
   CUDA_CHECK_ERROR(cudaStreamAddCallback(
-      stream, cmpCallback, data->clbkArgs, 0
-    ), "");
+    stream, cmpCallback, data->clbkArgs, 0
+  ), "");
+
 }
 
 static void run_checkTxExplicit(knlman_callback_params_s params)
@@ -177,9 +179,9 @@ static void run_checkTxExplicit(knlman_callback_params_s params)
   CUDA_EVENT_RECORD(threadData->cmpStartEvent, stream);
   HeTM_knl_checkTxExplicit<<<blocks, threads, 0, stream>>>(data->knlArgs);
   CUDA_EVENT_RECORD(threadData->cmpStopEvent, stream);
-  CUDA_EVENT_ELAPSED_TIME(&HeTM_thread_data->timeCmp, HeTM_thread_data->cmpStartEvent,
-    HeTM_thread_data->cmpStopEvent);
-  HeTM_thread_data->timeCmpSum += HeTM_thread_data->timeCmp;
+  CUDA_EVENT_ELAPSED_TIME(&threadData->timeCmp, threadData->cmpStartEvent,
+    threadData->cmpStopEvent);
+  threadData->timeCmpSum += threadData->timeCmp;
 
   CUDA_CHECK_ERROR(cudaStreamAddCallback(
       stream, cmpCallback, threadData, 0
@@ -195,7 +197,12 @@ static void CUDART_CB cmpCallback(cudaStream_t event, cudaError_t status, void *
     // TODO: exit application
   }
 
-  // printf(" --- send to %i wait cmp\n", threadData->id);
+  TIMER_T now;
+  TIMER_READ(now);
+  double timeTaken = TIMER_DIFF_SECONDS(threadData->beforeCmpKernel, now);
+  // printf(" --- send to %i wait cmp delay=%fms\n", threadData->id, timeTaken*1000);
+
+  threadData->timeCmpKernels += timeTaken;
   threadData->isCmpDone = 1;
   __sync_synchronize(); // cmpCallback is called from a different thread
 }

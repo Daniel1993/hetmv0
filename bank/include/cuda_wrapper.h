@@ -49,18 +49,21 @@ typedef struct cuda_info {
 	int threadNum;
 	int blockNum;
 	int TransEachThread;
-	int set_percent;
+	float set_percent;
 	int num_ways;
+	int num_sets;
+
+	size_t memcd_array_size;
 
 	// TODO: this is memcd
-	int clock;
-	int *version;
-  queue_t *q;
-	unsigned int *gpu_queue;
-	cuda_output_t *output;
-	size_t queue_size;
-	long run_size;
-	int blockNumG;
+	// int clock;
+	// int *version;
+  // queue_t *q;
+	// unsigned int *gpu_queue;
+	// cuda_output_t *output;
+	// size_t queue_size;
+	// long run_size;
+	// int blockNumG;
 } cuda_t;
 
 typedef struct stream_info {
@@ -90,7 +93,7 @@ extern "C" {
 
 // TODO: put GRANULE_T or account_t
 cuda_t * jobWithCuda_init(account_t *base, int nbCPUThreads, int size, int trans, int hash, int tx, int bl, int hprob, float hmult);
-void jobWithCuda_initMemcd(cuda_t *cd, int ways, int wr, int sr); // memcd
+void jobWithCuda_initMemcd(cuda_t *cd, int ways, int sets, float wr, int sr); // memcd
 
 int jobWithCuda_run(cuda_t *d, account_t *a);
 

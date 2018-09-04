@@ -8,10 +8,10 @@
 #ifndef MAX_THREADS
 #define MAX_THREADS 128 // TODO: used somewhere else
 #endif
-#define HETM_BUFFER_MAXSIZE 1024
+#define HETM_BUFFER_MAXSIZE 128
 
 extern __thread HETM_LOG_T *HeTM_log;
-extern __thread void* HeTM_bufAddrs[HETM_BUFFER_MAXSIZE];
+extern __thread void* volatile HeTM_bufAddrs[HETM_BUFFER_MAXSIZE];
 extern __thread uintptr_t HeTM_bufVal[HETM_BUFFER_MAXSIZE];
 extern __thread uintptr_t HeTM_bufVers[HETM_BUFFER_MAXSIZE];
 extern __thread uintptr_t HeTM_version;
@@ -59,11 +59,13 @@ extern int errors[MAX_THREADS][HTM_NB_ERRORS];
 
 #undef HTM_SGL_after_write
 #ifdef HETM_INSTRUMENT_CPU
-#define HTM_SGL_after_write(addr, val) \
+#define HTM_SGL_after_write(addr, val) ({ \
+  GRANULE_TYPE _val = (val); \
   HeTM_bufAddrs[HeTM_ptr] = addr; \
-  HeTM_bufVal[HeTM_ptr]   = val; \
-  HeTM_bufVers[HeTM_ptr]  = 0; \
+  HeTM_bufVal[HeTM_ptr]   = (uintptr_t)_val; \
+  /*HeTM_bufVers[HeTM_ptr]  = 0;*/ \
   HeTM_ptr++; \
+}) \
 //
 #else
 #define HTM_SGL_after_write(addr, val) /* empty */

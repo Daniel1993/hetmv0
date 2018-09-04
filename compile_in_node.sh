@@ -18,11 +18,6 @@ fi
 find . -name ".DS_Store" -delete
 find . -name "._*" -delete
 
-tar -czf $NAME.tar.gz .
-
 ssh $NODE "mkdir -p $DIR/$DM "
-scp $NAME.tar.gz $NODE:$DM
-ssh $NODE "cd $DM ; gunzip $NAME.tar.gz ; tar -xf $NAME.tar ; \
-      rm *.tar *.tar.gz ; "
+rsync -avz . $NODE:$DM
 
-rm $NAME.tar.gz
