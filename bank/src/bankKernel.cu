@@ -329,10 +329,10 @@ __device__ void update_tx(PR_txCallDefArgs, int txCount)
 #endif
 	}
 
-	#pragma unroll
-	for (j = 0; j < BANK_NB_TRANSFERS / 2; ++j) {
+	// #pragma unroll
+	// for (j = 0; j < BANK_NB_TRANSFERS / 2; ++j) {
 		// TODO: make the GPU slower
-		target = j*2;
+		target = 0;// j*2;
 		if (idx[j] < 0 || idx[j] >= nbAccounts || idx[target] < 0 || idx[target] >= nbAccounts) {
 			break;
 		}
@@ -358,7 +358,7 @@ __device__ void update_tx(PR_txCallDefArgs, int txCount)
 // 		accounts[idx[target]] = nval; //write changes to write set
 // #endif
 // 		if (pr_args.is_abort) break; // exits the inner (2x) for-loop
-	}
+	// }
 #ifndef BANK_DISABLE_PRSTM
 	if (pr_args.is_abort) { PR_txRestart(); }
 	PR_txCommit();

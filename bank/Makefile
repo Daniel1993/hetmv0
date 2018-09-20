@@ -102,6 +102,10 @@ endif
 all: $(APP)
 	# bank bank.o tsx_impl.o kernel.o pr-stm.o cmp_kernels.o shared.o thread.o
 
+simple: $(OBJS)
+	# does not recompile everything
+	$(NVCC) $(LDFLAGS) -o $(APP) $(OBJS)
+
 # TODO: propagate PR_MAX_RWSET_SIZE and HETM_CMP_TYPE
 $(APP): $(OBJS)
 	@echo " ============================================ "
@@ -160,7 +164,7 @@ $(APP): $(OBJS)
 		PRINT_DEB=$(PRINT_DEB)
 	@echo "Linking..."
 	### TODO: optimization breaks performance
-	$(CXX) $(CXXFLAGS) -O2 -o $(SRC)/bank.o $(SRC)/bank.cpp
+	#$(CXX) $(CXXFLAGS) -O1 -o $(SRC)/bank.o $(SRC)/bank.cpp
 	#$(CXX) $(CXXFLAGS) -O2 -o $(SRC)/memcd2.o $(SRC)/memcd2.cpp
 	$(NVCC) $(LDFLAGS) -o $@ $(OBJS)
 

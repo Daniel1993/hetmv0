@@ -90,6 +90,10 @@ OBJS := $(MEMCD_OBJS)
 all: $(APP)
 	# Done
 
+simple: $(OBJS)
+	$(CXX) $(CXXFLAGS) -O3 -o $(SRC)/memcd2.o $(SRC)/memcd2.cpp
+	$(NVCC) $(LDFLAGS) -o $(APP) $(OBJS)
+
 # TODO: propagate PR_MAX_RWSET_SIZE and HETM_CMP_TYPE
 $(APP): $(OBJS)
 	@echo " ============================================ "
@@ -148,7 +152,7 @@ $(APP): $(OBJS)
 		PRINT_DEB=$(PRINT_DEB)
 	@echo "Linking..."
 	### TODO: optimization breaks performance
-	$(CXX) $(CXXFLAGS) -O2 -o $(SRC)/memcd2.o $(SRC)/memcd2.cpp
+	# $(CXX) $(CXXFLAGS) -O3 -o $(SRC)/memcd2.o $(SRC)/memcd2.cpp
 	$(NVCC) $(LDFLAGS) -o $@ $(OBJS)
 
 %.o:	%.c

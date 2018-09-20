@@ -1,0 +1,16 @@
+Host intel14_v1
+    HostName intel14.gsd.inesc-id.pt
+    User dcastro
+    IdentityFile ~/.ssh/id_rsa_daniel
+Host intel14_v2
+    HostName 146.193.41.51
+    User dcastro
+    IdentityFile ~/.ssh/id_rsa_daniel
+Host angainor
+    HostName 146.193.41.205
+    User dcastro
+    IdentityFile ~/.ssh/id_rsa_daniel
+Host cosmos
+    HostName 146.193.41.212
+    User dcastro
+    IdentityFile ~/.ssh/id_rsa_daniel

@@ -58,8 +58,10 @@ typedef struct HeTM_bankTx_input_ {
 } HeTM_bankTx_input_s;
 
 typedef struct HeTM_memcdTx_input_ {
-	PR_GRANULE_T *key;           /* keys in global memory */
+	PR_GRANULE_T *key;           /* keys in global memory --> 4B */
+	PR_GRANULE_T *extraKey;      /* 3*4B */
 	PR_GRANULE_T *val;           /* values in global memory */
+	PR_GRANULE_T *extraVal;      /* 7*4B */
 	PR_GRANULE_T *ts;            /* last access TS in global memory */
 	PR_GRANULE_T *state;         /* state in global memory */
 	PR_GRANULE_T *setUsage;      /* state in global memory */
@@ -87,6 +89,8 @@ __global__ void memcd_check(PR_GRANULE_T* keys, size_t size);
 __global__
 // __launch_bounds__(1024, 1)
 void memcdReadTx(PR_globalKernelArgs);
+
+__global__ void emptyKernelTx(PR_globalKernelArgs);
 
 /****************************************************************************
  *	FUNCTIONS

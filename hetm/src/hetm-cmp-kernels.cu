@@ -29,28 +29,31 @@ __global__ void HeTM_knl_checkTxBitmapCache(HeTM_knl_cmp_args_s args)
 
   // TODO: these must be the same
   int sizeWSet = args.sizeWSet; /* Size of the entire log */
-  // int sizeRSet = args.sizeRSet; /* Size of the device log */
+  size_t wsetBits = HeTM_knl_global.hostWSetCacheBits;
+  // __shared__ unsigned char isConflShared;
 
+  // if (id == sizeWSetCache) printf("cache size of %i\n", sizeWSetCache);
+
+  // need the whole size (each thread matches the GPU read-set with the cache)
   if (id >= sizeWSet) return; // the thread has nothing to do
 
   unsigned char *rset = (unsigned char*)HeTM_knl_global.devRSet;
   unsigned char *wset = (unsigned char*)HeTM_knl_global.hostWSetCache;
-  size_t wsetBits = HeTM_knl_global.hostWSetCacheBits;
-  // PR_GRANULE_T *a = (PR_GRANULE_T*)HeTM_knl_global.devMemPoolBasePtr;
-  // PR_GRANULE_T *b = (PR_GRANULE_T*)HeTM_knl_global.devMemPoolBackupBasePtr;
 
-  // TODO: use shared memory
   int cacheId = id >> wsetBits;
   unsigned char isNewWrite = wset[cacheId];
-  unsigned char isConfl = rset[id] && isNewWrite;
+
+  // checks for a chunck of CPU dataset if it was read in GPU (4096 items)
+  int isConfl = rset[id] && isNewWrite;
+
+  // TODO: check if the atomicOr is faster than the if
+  // atomicOr(HeTM_knl_global.isInterConfl, isConfl);
+  // atomicOr(&(((unsigned char*)HeTM_knl_global.hostWSetCacheConfl)[cacheId]), (unsigned char)isConfl);
 
   if (isConfl) {
     *HeTM_knl_global.isInterConfl = 1;
     ((unsigned char*)(HeTM_knl_global.hostWSetCacheConfl))[cacheId] = 1;
   }
-  // if (isNewWrite) {
-  //   a[id] = b[id];
-  // }
 }
 
 __global__ void HeTM_knl_checkTxBitmap(HeTM_knl_cmp_args_s args, size_t offset)
@@ -142,7 +145,7 @@ __device__ void applyHostWritesOnDev(
 );
 
 // ---------------------- COMPRESSED
-__device__ void checkTx_versionLOG(int sizeWSet, int sizeRSet);
+__device__ void checkTx_versionLOG(int sizeWSet, int sizeRSet, int idCPUThread);
 // ---------------------------------
 
 /****************************************
@@ -155,8 +158,9 @@ __global__ void HeTM_knl_checkTxCompressed(HeTM_knl_cmp_args_s args)
 {
   int sizeWSet = args.sizeWSet; /* Size of the host log */
   int sizeRSet = args.sizeRSet; /* Size of the device log */
+  int idCPUThr = args.idCPUThr; /* Size of the device log */
 
-  checkTx_versionLOG(sizeWSet, sizeRSet);
+  checkTx_versionLOG(sizeWSet, sizeRSet, idCPUThr);
 }
 
 #if HETM_LOG_TYPE == HETM_ADDR_LOG
@@ -236,7 +240,7 @@ __global__ void HeTM_knl_checkTxExplicit(HeTM_knl_cmp_args_s args)
 // TODO: need comments
 #if HETM_LOG_TYPE == HETM_VERS2_LOG
 // entries_per_thread == LOG_SIZE*STM_LOG_BUFFER_SIZE
-__device__ void checkTx_versionLOG(int sizeWSet, int entries_per_thread)
+__device__ void checkTx_versionLOG(int sizeWSet, int entries_per_thread, int idCPUThread)
 {
   int id;
   uintptr_t offset = 0;
@@ -388,7 +392,7 @@ __device__ void checkTx_versionLOG(int sizeWSet, int entries_per_thread)
 }
 
 #else /* HETM_LOG_TYPE != HETM_VERS2_LOG */
-__device__ void checkTx_versionLOG(int sizeWSet, int sizeRSet)
+__device__ void checkTx_versionLOG(int sizeWSet, int sizeRSet, int idCPUThread)
 {
   int id;
   uintptr_t offset = 0, index = 0;
@@ -399,6 +403,8 @@ __device__ void checkTx_versionLOG(int sizeWSet, int sizeRSet)
   PR_GRANULE_T *a = (PR_GRANULE_T*)HeTM_knl_global.devMemPoolBasePtr;
 
   HeTM_CPULogEntry *stm_log = (HeTM_CPULogEntry*)HeTM_knl_global.hostWSet;
+  int nbEntriesLogBuffer = STM_LOG_BUFFER_SIZE * LOG_SIZE;
+  stm_log += nbEntriesLogBuffer * idCPUThread;
 
   id = blockIdx.x*blockDim.x+threadIdx.x;
 
@@ -423,7 +429,8 @@ __device__ void checkTx_versionLOG(int sizeWSet, int sizeRSet)
 
     if (fetch_gpu != 0) {
       // CPU and GPU conflict in some address
-      printf("found confl on index=%i\n", index);
+      // printf("found confl on index=%lu id=%i (last 4: %i %i %i %i)\n", index, id,
+      //   stm_log[id-4].pos, stm_log[id-3].pos, stm_log[id-2].pos, stm_log[id-1].pos);
       *HeTM_knl_global.isInterConfl = 1;
     }
 

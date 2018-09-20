@@ -12,6 +12,7 @@ typedef struct offload_bank_tx_thread_ {
 } offload_memcd_tx_thread_s;
 
 static void offloadMemcdTxThread(void *argsPtr);
+static void offloadEmptyTxThread(void *argsPtr);
 
 void call_cuda_check_memcd(PR_GRANULE_T* gpuMempool, size_t size)
 {
@@ -74,20 +75,54 @@ int jobWithCuda_runMemcd(void *thread_data, cuda_t *d, account_t *a, int clock) 
   return 1;
 }
 
+extern "C"
+int jobWithCuda_runEmptyKernel(void *thread_data, cuda_t *d, account_t *a, int clock) // TODO: rerun?
+{
+  bool err = 1;
+  cudaError_t cudaStatus;
+  static offload_memcd_tx_thread_s offload_thread_args;
+
+  while (err) {
+    err = 0;
+
+    CHECK_ERROR_CONTINUE(cudaSetDevice(DEVICE_ID));
+
+    offload_thread_args.thread_data = (thread_data_t*)thread_data;
+    offload_thread_args.d = d;
+    offload_thread_args.a = a;
+
+    HeTM_async_request((HeTM_async_req_s){
+      .args = (void*)&offload_thread_args,
+      .fn = offloadEmptyTxThread
+    });
+
+    //Check for errors
+    cudaStatus = cudaGetLastError();
+  }
+
+  if (cudaStatus != cudaSuccess) {
+    printf("\nTransaction kernel launch failed. Error code: %s.\n", cudaGetErrorString(cudaStatus));
+    return 0;
+  }
+
+  return 1;
+}
+
 
 static void offloadMemcdTxThread(void *argsPtr)
 {
   offload_memcd_tx_thread_s *args = (offload_memcd_tx_thread_s*)argsPtr;
-  thread_data_t *cd = args->thread_data;
+  // thread_data_t *cd = args->thread_data;
   cuda_t *d = args->d;
   account_t *a = args->a;
+  static thread_local unsigned seed = 8293126;
 
   cudaError_t cudaStatus;
 
   CUDA_CHECK_ERROR(cudaSetDevice(DEVICE_ID), "");
 
-  // 100% * 1000
-  unsigned decider = RAND_R_FNC(cd->seed) % 100000;
+  // 100% * 1000 --- cd->seed is not working correcly
+  unsigned decider = RAND_R_FNC(seed) % 100000;
   // int read_size;
 
   // TODO
@@ -132,4 +167,12 @@ static void offloadMemcdTxThread(void *argsPtr)
   if (cudaStatus != cudaSuccess) {
     printf("\nTransaction kernel launch failed. Error code: %s.\n", cudaGetErrorString(cudaStatus));
   }
+}
+
+static void offloadEmptyTxThread(void *argsPtr)
+{
+  extern pr_tx_args_s HeTM_pr_args;
+
+  CUDA_CHECK_ERROR(cudaSetDevice(DEVICE_ID), "");
+  PR_run(emptyKernelTx, &HeTM_pr_args, NULL);
 }

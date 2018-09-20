@@ -455,6 +455,7 @@ static int launchCmpKernel(HeTM_thread_s *threadData, size_t wsetSize)
     .knlArgs = {
       .sizeWSet = (int)wsetSize,
       .sizeRSet = (int)HeTM_shared_data.rsetLogSize,
+      .idCPUThr = (int)threadData->id,
     },
     .clbkArgs = threadData
   };

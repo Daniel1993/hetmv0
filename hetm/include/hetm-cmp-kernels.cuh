@@ -22,6 +22,7 @@
 typedef struct HeTM_knl_cmp_args_ {
 	int sizeWSet; /* Size of the host log */
 	int sizeRSet; /* Size of the device log */
+	int idCPUThr;
 } HeTM_knl_cmp_args_s;
 
 typedef struct HeTM_cmp_ {

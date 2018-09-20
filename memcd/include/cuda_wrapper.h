@@ -100,6 +100,7 @@ void jobWithCuda_initMemcd(cuda_t *cd, int ways, int sets, float wr, int sr); //
 int jobWithCuda_run(cuda_t *d, account_t *a);
 
 int jobWithCuda_runMemcd(void *thread_data, cuda_t *d, account_t *a, int clock);
+int jobWithCuda_runEmptyKernel(void *thread_data, cuda_t *d, account_t *a, int clock);
 
 account_t* jobWithCuda_swap(cuda_t *d);
 

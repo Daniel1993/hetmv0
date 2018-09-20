@@ -168,10 +168,11 @@
 	/* TODO: explicit log only */ \
 	HeTM_GPU_log_explicit_before_reads \
 	/* ---------------------- */ \
+	/* add read to devLogR */ \
 	for (i = 0; i < args->rset.size; i++) { \
-		SET_ON_LOG(args->rset.addrs[i]); /* add read to devLogR */ \
-		/*memman_access_addr_dev(GPU_log->bmap, args->rset.addrs[i]);*/ \
+		SET_ON_LOG(args->rset.addrs[i]); \
 	} \
+	/*memman_access_addr_dev(GPU_log->bmap, args->rset.addrs[i]);*/ \
 	for (i = 0; i < args->wset.size; i++) { \
 		memman_access_addr_dev(GPU_log->bmap, args->wset.addrs[i]); \
 	} \

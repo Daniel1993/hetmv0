@@ -15,8 +15,10 @@ typedef struct bank {
 } bank_t;
 
 typedef struct memcd {
-	account_t *key;   /* keys in global memory */
-	account_t *val;   /* values in global memory */
+	account_t *key;   /* keys in global memory --> 4B */
+  account_t *extraKey; /* 3*4B */
+	account_t *val;   /* values in global memory --> 4B */
+	account_t *extraVal;   /* 7*4B */
 	account_t *ts;    /* last access TS in global memory */
 	account_t *state; /* state in global memory */
 	account_t *setUsage; /* state in global memory */

@@ -170,12 +170,14 @@ static void run_memcdReadTx(knlman_callback_params_s params)
 
   input->key      = d->dev_a;
   // TODO: /sizeof(...)
-  input->val      = input->key + (d->memcd_nbSets*d->memcd_nbWays);
-  input->ts       = input->val + (d->memcd_nbSets*d->memcd_nbWays);
+  input->extraKey = input->key + (d->memcd_nbSets*d->memcd_nbWays);
+  input->val      = input->extraKey + 3*(d->memcd_nbSets*d->memcd_nbWays);
+  input->extraVal = input->val + (d->memcd_nbSets*d->memcd_nbWays);
+  input->ts       = input->extraVal + 7*(d->memcd_nbSets*d->memcd_nbWays);
   input->state    = input->ts  + (d->memcd_nbSets*d->memcd_nbWays);
   input->setUsage = input->state + (d->memcd_nbSets*d->memcd_nbWays);
-  input->nbSets = d->num_sets;
-  input->nbWays = d->num_ways;
+  input->nbSets   = d->num_sets;
+  input->nbWays   = d->num_ways;
   input->input_keys = GPUInputBuffer;
   input->input_vals = GPUInputBuffer;
   input->output     = (memcd_get_output_t*)GPUoutputBuffer;
@@ -224,11 +226,14 @@ static void run_memcdWriteTx(knlman_callback_params_s params)
   inputDev = (HeTM_memcdTx_input_s*)memman_get_gpu(NULL);
 
   input->key   = d->dev_a;
-  input->val   = input->key + (d->memcd_array_size/4)/sizeof(PR_GRANULE_T);
-  input->ts    = input->val + (d->memcd_array_size/4)/sizeof(PR_GRANULE_T);
-  input->state = input->ts  + (d->memcd_array_size/4)/sizeof(PR_GRANULE_T);
-  input->nbSets = d->num_sets;
-  input->nbWays = d->num_ways;
+  input->extraKey = input->key + (d->memcd_nbSets*d->memcd_nbWays);
+  input->val      = input->extraKey + 3*(d->memcd_nbSets*d->memcd_nbWays);
+  input->extraVal = input->val + (d->memcd_nbSets*d->memcd_nbWays);
+  input->ts       = input->extraVal + 7*(d->memcd_nbSets*d->memcd_nbWays);
+  input->state    = input->ts  + (d->memcd_nbSets*d->memcd_nbWays);
+  input->setUsage = input->state + (d->memcd_nbSets*d->memcd_nbWays);
+  input->nbSets   = d->num_sets;
+  input->nbWays   = d->num_ways;
   input->input_keys = GPUInputBuffer;
   input->input_vals = GPUInputBuffer;
   input->output     = (memcd_get_output_t*)GPUoutputBuffer;

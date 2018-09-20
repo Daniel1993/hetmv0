@@ -482,6 +482,9 @@ __global__ void memcd_check(PR_GRANULE_T* keys, size_t size)
 	printf("%i : KEY=%i STATE=%i (valid=%i)\n", id, keys[id], stateBegin[id], stateBegin[id] & MEMCD_VALID);
 }
 
+__global__
+void emptyKernelTx(PR_globalKernelArgs) { }
+
 /*********************************
  *	readKernelTransaction()
  *
@@ -503,7 +506,9 @@ void memcdReadTx(PR_globalKernelArgs)
 
 	HeTM_memcdTx_input_s *input = (HeTM_memcdTx_input_s*)args.inBuf;
 	PR_GRANULE_T       *keys = (PR_GRANULE_T*)input->key;
+	PR_GRANULE_T  *extraKeys = (PR_GRANULE_T*)input->extraKey;
 	PR_GRANULE_T     *values = (PR_GRANULE_T*)input->val;
+	// PR_GRANULE_T  *extraVals = (PR_GRANULE_T*)input->extraVal;
 	PR_GRANULE_T *timestamps = (PR_GRANULE_T*)input->ts;
 	PR_GRANULE_T      *state = (PR_GRANULE_T*)input->state;
 	PR_GRANULE_T   *setUsage = (PR_GRANULE_T*)input->setUsage;
@@ -512,9 +517,10 @@ void memcdReadTx(PR_globalKernelArgs)
 	memcd_get_output_t  *out = (memcd_get_output_t*)input->output;
 	int           curr_clock = *((int*)input->curr_clock);
 	int          *input_keys = (int*)input->input_keys;
+	int               nbSets = input->nbSets;
+	int               nbWays = input->nbWays;
+	int            sizeCache = nbSets * nbWays;
 
-	int nbSets = input->nbSets;
-	int nbWays = input->nbWays;
 
 	// __shared__ int aborted[1024];
 	// if (wayId == 0) aborted[targetKey] = 0;
@@ -532,6 +538,13 @@ void memcdReadTx(PR_globalKernelArgs)
 		int thread_is_found;
 		PR_GRANULE_T thread_key;
 		PR_GRANULE_T thread_val;
+		// PR_GRANULE_T thread_val1;
+		// PR_GRANULE_T thread_val2;
+		// PR_GRANULE_T thread_val3;
+		// PR_GRANULE_T thread_val4;
+		// PR_GRANULE_T thread_val5;
+		// PR_GRANULE_T thread_val6;
+		// PR_GRANULE_T thread_val7;
 		PR_GRANULE_T thread_state;
 
 		// PR_write(&timestamps[thread_pos], curr_clock);
@@ -554,27 +567,37 @@ void memcdReadTx(PR_globalKernelArgs)
 			}
 			nbRetries++;
 
-			PR_read(&keys[thread_pos]);
-			// // TODO:
+			// PR_read(&keys[thread_pos]);
+			PR_read(&extraKeys[thread_pos]);
+			PR_read(&extraKeys[thread_pos+sizeCache]);
+			PR_read(&extraKeys[thread_pos+2*sizeCache]);
+			// TODO:
 			// if (thread_key != PR_read(&keys[thread_pos])) {
 			// 	i--; // retry, key changed
 			// 	break;
 			// }
 			thread_val = PR_read(&values[thread_pos]);
+			// thread_val1 = PR_read(&extraVals[thread_pos]);
+			// thread_val2 = PR_read(&extraVals[thread_pos+sizeCache]);
+			// thread_val3 = PR_read(&extraVals[thread_pos+2*sizeCache]);
+			// thread_val4 = PR_read(&extraVals[thread_pos+3*sizeCache]);
+			// thread_val5 = PR_read(&extraVals[thread_pos+4*sizeCache]);
+			// thread_val6 = PR_read(&extraVals[thread_pos+5*sizeCache]);
+			// thread_val7 = PR_read(&extraVals[thread_pos+6*sizeCache]);
 			ts = PR_read(&timestamps[thread_pos]); // assume read-before-write
 			if (ts < curr_clock && nbRetries < 5) {
 				PR_write(&timestamps[thread_pos], curr_clock);
-				// PR_read(&setUsage[target_set]); // "locks" the set
+				PR_read(&setUsage[target_set]); // "locks" the set
 			}
 			else {
 				timestamps[thread_pos] = curr_clock; // TODO: cannot transactionally write this...
-				// PR_read(&setUsage[target_set]); // "locks" the set
+				PR_read(&setUsage[target_set]); // "locks" the set
 			}
 
 			PR_txCommit();
 
 			out[targetKey + i].isFound = 1;
-			out[targetKey + i].value = thread_val;
+			out[targetKey + i].value = thread_val/*|thread_val1|thread_val2|thread_val3|thread_val4|thread_val5|thread_val6|thread_val7*/;
 		}
 		// if (aborted[targetKey]) {
 		// 	// i--; // repeat this loop // TODO: blocks forever
@@ -623,16 +646,18 @@ __global__ void memcdWriteTx(PR_globalKernelArgs)
 	HeTM_memcdTx_input_s *input = (HeTM_memcdTx_input_s*)args.inBuf;
 	memcd_get_output_t  *out = (memcd_get_output_t*)input->output;
 	PR_GRANULE_T       *keys = (PR_GRANULE_T*)input->key;
+	PR_GRANULE_T  *extraKeys = (PR_GRANULE_T*)input->extraKey;
 	PR_GRANULE_T     *values = (PR_GRANULE_T*)input->val;
+	PR_GRANULE_T  *extraVals = (PR_GRANULE_T*)input->extraVal;
 	PR_GRANULE_T *timestamps = (PR_GRANULE_T*)input->ts;
 	PR_GRANULE_T      *state = (PR_GRANULE_T*)input->state;
 	PR_GRANULE_T   *setUsage = (PR_GRANULE_T*)input->setUsage;
 	int           curr_clock = *((int*)input->curr_clock);
 	int          *input_keys = (int*)input->input_keys;
 	int          *input_vals = (int*)input->input_vals;
-
-	int nbSets = (int)input->nbSets;
-	int nbWays = (int)input->nbWays;
+	int               nbSets = (int)input->nbSets;
+	int               nbWays = (int)input->nbWays;
+	int            sizeCache = nbSets*nbWays;
 
 	int thread_is_found; // TODO: use shuffle instead
 	int thread_is_empty; // TODO: use shuffle instead
@@ -643,6 +668,9 @@ __global__ void memcdWriteTx(PR_globalKernelArgs)
 	PR_GRANULE_T thread_state;
 
 	int checkKey;
+	// int checkKey1;
+	// int checkKey2;
+	// int checkKey3;
 	int maxRetries = 0;
 
 	for (int i = 0; i < nbWays + devParsedData.trans; ++i) {
@@ -719,8 +747,12 @@ __global__ void memcdWriteTx(PR_globalKernelArgs)
 			nbRetries++;
 
 			checkKey = PR_read(&keys[thread_pos]); // read-before-write
+			/*checkKey1 = */PR_read(&keys[thread_pos]); // read-before-write
+			/*checkKey2 = */PR_read(&keys[thread_pos+sizeCache]); // read-before-write
+			/*checkKey3 = */PR_read(&keys[thread_pos+2*sizeCache]); // read-before-write
 			// TODO: does not work
-			// if (checkKey != input_key) { // we are late
+			// if (checkKey != input_key || checkKey1 != input_key
+			// 		|| checkKey2 != input_key || checkKey3 != input_key) { // we are late
 			// 	failed_to_insert[warpSliceID] = 1;
 			// 	break;
 			// }
@@ -728,9 +760,19 @@ __global__ void memcdWriteTx(PR_globalKernelArgs)
 			PR_read(&timestamps[thread_pos]); // read-before-write
 			// TODO: check if values changed: if yes abort
 			PR_write(&keys[thread_pos], input_key);
+			PR_write(&extraKeys[thread_pos], input_key);
+			PR_write(&extraKeys[thread_pos+sizeCache], input_key);
+			PR_write(&extraKeys[thread_pos+2*sizeCache], input_key);
 			PR_write(&values[thread_pos], input_val);
+			PR_write(&extraVals[thread_pos], input_val);
+			PR_write(&extraVals[thread_pos+sizeCache], input_val);
+			PR_write(&extraVals[thread_pos+2*sizeCache], input_val);
+			PR_write(&extraVals[thread_pos+3*sizeCache], input_val);
+			PR_write(&extraVals[thread_pos+4*sizeCache], input_val);
+			PR_write(&extraVals[thread_pos+5*sizeCache], input_val);
+			PR_write(&extraVals[thread_pos+6*sizeCache], input_val);
 			PR_write(&timestamps[thread_pos], curr_clock);
-			// PR_read(&setUsage[target_set]);
+			PR_read(&setUsage[target_set]);
 			// TODO: it seems not to reach this if but the nbRetries is needed
 						// if (nbRetries == 8191) printf("thr%i aborted 8191 times for key%i thread_pos=%i rsetSize=%lu, wsetSize=%lu\n",
 						// 	id, input_key, thread_pos, pr_args.rset.size, pr_args.wset.size);
@@ -757,8 +799,12 @@ __global__ void memcdWriteTx(PR_globalKernelArgs)
 			nbRetries++;
 
 			checkKey = PR_read(&keys[thread_pos]); // read-before-write
+			/*checkKey1 = */PR_read(&keys[thread_pos]); // read-before-write
+			/*checkKey2 = */PR_read(&keys[thread_pos+sizeCache]); // read-before-write
+			/*checkKey3 = */PR_read(&keys[thread_pos+2*sizeCache]); // read-before-write
 			// TODO: does not work
-			// if (checkKey != input_key) { // we are late
+			// if (checkKey != input_key || checkKey1 != input_key
+			// 		|| checkKey2 != input_key || checkKey3 != input_key) { // we are late
 			// 	failed_to_insert[warpSliceID] = 1;
 			// 	break;
 			// }
@@ -767,7 +813,17 @@ __global__ void memcdWriteTx(PR_globalKernelArgs)
 			PR_read(&state[thread_pos]); // read-before-write
 			// TODO: check if values changed: if yes abort
 			PR_write(&keys[thread_pos], input_key);
+			PR_write(&extraKeys[thread_pos], input_key);
+			PR_write(&extraKeys[thread_pos+sizeCache], input_key);
+			PR_write(&extraKeys[thread_pos+2*sizeCache], input_key);
 			PR_write(&values[thread_pos], input_val);
+			PR_write(&extraVals[thread_pos], input_val);
+			PR_write(&extraVals[thread_pos+sizeCache], input_val);
+			PR_write(&extraVals[thread_pos+2*sizeCache], input_val);
+			PR_write(&extraVals[thread_pos+3*sizeCache], input_val);
+			PR_write(&extraVals[thread_pos+4*sizeCache], input_val);
+			PR_write(&extraVals[thread_pos+5*sizeCache], input_val);
+			PR_write(&extraVals[thread_pos+6*sizeCache], input_val);
 			PR_write(&timestamps[thread_pos], curr_clock);
 			int newState = MEMCD_VALID|MEMCD_WRITTEN;
 			PR_write(&state[thread_pos], newState);
@@ -797,7 +853,17 @@ __global__ void memcdWriteTx(PR_globalKernelArgs)
 			PR_read(&timestamps[thread_pos]); // read-before-write
 			// TODO: check if values changed: if yes abort
 			PR_write(&keys[thread_pos], input_key);
+			PR_write(&extraKeys[thread_pos], input_key);
+			PR_write(&extraKeys[thread_pos+sizeCache], input_key);
+			PR_write(&extraKeys[thread_pos+2*sizeCache], input_key);
 			PR_write(&values[thread_pos], input_val);
+			PR_write(&extraVals[thread_pos], input_val);
+			PR_write(&extraVals[thread_pos+sizeCache], input_val);
+			PR_write(&extraVals[thread_pos+2*sizeCache], input_val);
+			PR_write(&extraVals[thread_pos+3*sizeCache], input_val);
+			PR_write(&extraVals[thread_pos+4*sizeCache], input_val);
+			PR_write(&extraVals[thread_pos+5*sizeCache], input_val);
+			PR_write(&extraVals[thread_pos+6*sizeCache], input_val);
 			PR_write(&timestamps[thread_pos], curr_clock);
 			// if (nbRetries == 8191) printf("thr%i aborted 8191 times for key%i thread_pos=%i rsetSize=%lu, wsetSize=%lu\n",
 			// 	id, input_key, thread_pos, pr_args.rset.size, pr_args.wset.size);

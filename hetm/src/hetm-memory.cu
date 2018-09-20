@@ -19,8 +19,10 @@ static map<void*, size_t> alloced;
 static map<void*, size_t> freed;
 static size_t curSize;
 
-#define DEFAULT_BITMAP_GRANULARITY_BITS (12) // 4kB --> then I use a smart copy
-#define DEFAULT_BITMAP_GRANULARITY (0x1<<12)
+// #define DEFAULT_BITMAP_GRANULARITY_BITS (12) // 4kB --> then I use a smart copy
+// #define DEFAULT_BITMAP_GRANULARITY (0x1<<12)
+#define DEFAULT_BITMAP_GRANULARITY_BITS (15) // 32kB --> then I use a smart copy
+#define DEFAULT_BITMAP_GRANULARITY (0x1<<15)
 static size_t bitmapGran = DEFAULT_BITMAP_GRANULARITY;
 // static size_t bitmapGranBits = DEFAULT_BITMAP_GRANULARITY_BITS;
 
@@ -220,7 +222,6 @@ void HeTM_wset_log_cpy_to_gpu(
       // CHUNKED_LOG_FREE(node); // TODO: target thread must free
       continue;
     }
-    // printf("[%i] Cpy size=%zu\n", threadData->id, sizeToCpy);
     if (CUDA_CPY_TO_DEV_ASYNC(resAux, logAux->chunk, sizeToCpy, stream) != cudaSuccess) {
       printf("ERROR copying Dev %p/%p <-- %p/%p Host (nbEntries=%zu) \n"
              "           BUFFER=%p/%p totalCpy=%zu maxSize=%zu\n",

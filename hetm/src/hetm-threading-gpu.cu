@@ -655,21 +655,24 @@ static int launchCmpKernel(void *args)
   // CHECK FOR CONFLICTS ////////////////////////////////////
   CUDA_EVENT_RECORD(threadData->cmpStartEvent, (cudaStream_t)threadData->stream);
 #if HETM_CMP_TYPE == HETM_CMP_COMPRESSED
-  int cacheNbThreads = 256;
-  int cacheNbBlocks = HeTM_shared_data.wsetCacheSize / cacheNbThreads;
-  if (HeTM_shared_data.wsetCacheSize % cacheNbThreads != 0) {
+  int cacheNbThreads = 1024;
+  int cacheNbBlocks = HeTM_shared_data.wsetLogSize / cacheNbThreads;
+  if (HeTM_shared_data.wsetLogSize % cacheNbThreads != 0) {
     cacheNbBlocks++;
   }
+  // printf("Launch top level kernel (%i, %i) sizeWset=%lu\n", cacheNbBlocks, cacheNbThreads, HeTM_shared_data.wsetLogSize);
   HeTM_knl_checkTxBitmapCache<<<cacheNbBlocks, cacheNbThreads, 0, (cudaStream_t)threadData->stream>>>(
     (HeTM_knl_cmp_args_s){
       .sizeWSet = (int)HeTM_shared_data.wsetLogSize,
       .sizeRSet = (int)HeTM_shared_data.rsetLogSize,
+      .idCPUThr = 0,
   });
 #else /* HETM_CMP_EXPLICIT */
   HeTM_knl_checkTxBitmap_Explicit<<<blocksCheck, threadsPerBlock, 0, (cudaStream_t)threadData->stream>>>(
     (HeTM_knl_cmp_args_s){
       .sizeWSet = (int)HeTM_shared_data.wsetLogSize,
       .sizeRSet = (int)HeTM_shared_data.rsetLogSize,
+      .idCPUThr = 0,
   });
 #endif /* HETM_CMP_TYPE == HETM_CMP_COMPRESSED */
   CUDA_EVENT_RECORD(threadData->cmpStopEvent, (cudaStream_t)threadData->stream);
@@ -699,12 +702,12 @@ static int launchCmpKernel(void *args)
     cudaStream_t tmp;
     HeTM_reset_inter_confl_flag();
 
-    // TODO: I'm here: what if the data-set is too long? it will distrube this phase
-
     memman_select("HeTM_cpu_wset_cache_confl");
     unsigned char *conflInGPU = (unsigned char*)memman_get_cpu(NULL);
     memman_cpy_to_cpu(currentStream, &sizeCache);
-    // printf("POSSIBLE CONFLICT!!!\n");
+
+    static int possibleConflicts = 0;
+    // printf(" --- POSSIBLE CONFLICT - %i!!!\n", ++possibleConflicts);
 
     // memman_select("HeTM_cpu_wset");
     // memman_cpy_to_gpu(HeTM_memStream, &sizeWSet);
@@ -748,6 +751,7 @@ static int launchCmpKernel(void *args)
         (HeTM_knl_cmp_args_s){
           .sizeWSet = (int)HeTM_shared_data.wsetLogSize,
           .sizeRSet = (int)HeTM_shared_data.rsetLogSize,
+          .idCPUThr = 0,
         }, i * CACHE_GRANULE_SIZE);
 
       for (int j = i+1; j < sizeCache; ++j) {
@@ -829,8 +833,12 @@ static int launchCmpKernel(void *args)
       size_t size_cache_chunk = CACHE_GRANULE_SIZE * PR_LOCK_GRANULARITY;
       size_t size_to_cpy = size_cache_chunk;
 
-      if (size_to_cpy > sizeCPUMempool) {
-        size_to_cpy = sizeCPUMempool; // else copies beyond the buffer
+      if (size_to_cpy + i * size_cache_chunk > sizeCPUMempool) {
+        // if (i * size_cache_chunk > sizeCPUMempool) {
+        //   // TODO: this is a BUG
+        //   break;
+        // }
+        size_to_cpy = sizeCPUMempool - i * size_cache_chunk; // else copies beyond the buffer
       }
 
       CPUptr = (uintptr_t)CPUDataset;
@@ -849,11 +857,11 @@ static int launchCmpKernel(void *args)
         (HeTM_knl_cmp_args_s){
           .sizeWSet = (int)HeTM_shared_data.wsetLogSize,
           .sizeRSet = (int)HeTM_shared_data.rsetLogSize,
+          .idCPUThr = 0,
         }, i * CACHE_GRANULE_SIZE);
       tmp = currentStream;
       currentStream = nextStream;
       nextStream = tmp;
-
     }
     // cudaStreamSynchronize((cudaStream_t)threadData->stream);
     // override the remaining dataset
@@ -893,6 +901,7 @@ static int launchCmpKernel(void *args)
       (HeTM_knl_cmp_args_s){
         .sizeWSet = (int)HeTM_shared_data.wsetLogSize,
         .sizeRSet = (int)HeTM_shared_data.rsetLogSize,
+        .idCPUThr = 0,
       }, 0);
 #endif /* HETM_CMP_TYPE != HETM_CMP_COMPRESSED */
     NVTX_PUSH_RANGE("wait write", 3);

@@ -161,6 +161,9 @@ stm_log_newentry(HETM_LOG_T *log, long* volatile pos, int volatile val, long ver
     .time_stamp = (uint32_t)vers,
     .val = (int32_t)val,
   };
+  // if (entry.pos > 8192) { /* don't forget the +1 */
+  //   printf("setUsageEntry %i val=%i\n", entry.pos-1, entry.val);
+  // }
   // entry.val        = val;
   // entry.pos        = (pos_addr - base_addr) + 1; // just the offset, WARN: assumption on address space layout
   // entry.time_stamp = (uint32_t)vers; // WARN: may wrap around very often

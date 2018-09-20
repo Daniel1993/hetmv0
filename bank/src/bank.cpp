@@ -20,7 +20,7 @@ int isInterBatch = 0;
 // -----------------------------------------------------------------------------
 const size_t NB_OF_BUFFERS = 2; // 2 good + 2 bad
 
-const static int NB_CPU_TXS_PER_THREAD = 16384;
+const static int NB_CPU_TXS_PER_THREAD = 2048;
 
 int *GPUoutputBuffer, *CPUoutputBuffer;
 int *GPUInputBuffer, *CPUInputBuffer;
@@ -68,11 +68,7 @@ static int fill_GPU_input_buffers()
 	unsigned rnd = RAND_R_FNC(input_seed);
 	for (int i = 0; i < buffer_last; ++i) {
 		cpu_ptr[i] = GPU_ACCESS(rnd, parsedData.nb_accounts-40);
-		// if ((i % parsedData.GPUthreadNum) == 0) {
-			rnd = RAND_R_FNC(input_seed);
-		// } else {
-		// 	rnd += 4;
-		// }
+		rnd = RAND_R_FNC(input_seed);
 	}
 
 	memman_select("GPU_input_buffer_bad");
@@ -82,11 +78,7 @@ static int fill_GPU_input_buffers()
 	rnd = RAND_R_FNC(input_seed);
 	for (int i = 1; i < buffer_last; ++i) {
 		cpu_ptr[i] = INTERSECT_ACCESS_GPU(rnd, parsedData.nb_accounts-40);
-		// if ((i % parsedData.GPUthreadNum) == 0) {
-			rnd = RAND_R_FNC(input_seed);
-		// } else {
-		// 	rnd += 4;
-		// }
+		rnd = RAND_R_FNC(input_seed);
 	}
 #elif BANK_PART == 2 /* Uniform at random: interleaved CPU accesses incremental pages */
 	unsigned rnd = RAND_R_FNC(input_seed);
@@ -94,11 +86,7 @@ static int fill_GPU_input_buffers()
 		unsigned j = rnd % parsedData.nb_accounts;
 		cpu_ptr[i] = j;
 		cpu_ptr[i] &= (unsigned)-2; // get even accounts
-		// if ((i % parsedData.GPUthreadNum) == 0) {
-			rnd = RAND_R_FNC(input_seed);
-		// } else {
-		// 	rnd += 4;
-		// }
+		rnd = RAND_R_FNC(input_seed);
 	}
 
 	memman_select("GPU_input_buffer_bad");
@@ -144,8 +132,8 @@ static int fill_GPU_input_buffers()
 	unsigned rnd; // RAND_R_FNC(input_seed);
 	for (int i = 0; i < buffer_last; ++i) {
 		// int access = GPU_ACCESS(rnd, (parsedData.nb_accounts-BANK_NB_TRANSFERS-1));
-		if (!fscanf(GPU_input_file, "%i\n", &rnd)) {
-			printf("Error reading from file\n");
+		if (fscanf(GPU_input_file, "%i\n", &rnd) == EOF) {
+			printf("[%i] GPU error reading from file\n", i);
 		}
 		cpu_ptr[i] = rnd % parsedData.nb_accounts;
 	}
@@ -153,10 +141,10 @@ static int fill_GPU_input_buffers()
 	memman_select("GPU_input_buffer_bad");
 	cpu_ptr = (int*)memman_get_cpu(NULL);
 
-	// cpu_ptr[0] = 0; // deterministic abort
-	for (int i = 0; i < buffer_last; ++i) {
-		if (!fscanf(GPU_input_file, "%i\n", &rnd)) {
-			printf("Error reading from file\n");
+	cpu_ptr[0] = 0; // deterministic abort
+	for (int i = 1; i < buffer_last; ++i) {
+		if (fscanf(GPU_input_file, "%i\n", &rnd) == EOF) {
+			printf("[%i] GPU error reading from file\n", i);
 		}
 		cpu_ptr[i] = rnd % parsedData.nb_accounts;
 	}
@@ -210,7 +198,7 @@ static int fill_CPU_input_buffers()
 	for (int i = 0; i < good_buffers_last; ++i) {
 		// unsigned rnd = (*zipf_dist)(generator); // RAND_R_FNC(input_seed);
 		unsigned rnd;
-		if (!fscanf(CPU_input_file, "%i\n", &rnd)) {
+		if (fscanf(CPU_input_file, "%i\n", &rnd) == EOF) {
 			printf("Error reading from file\n");
 		}
 		CPUInputBuffer[i] = rnd % (parsedData.nb_accounts - 40);
@@ -220,7 +208,7 @@ static int fill_CPU_input_buffers()
 	for (int i = good_buffers_last; i < bad_buffers_last; ++i) {
 		// unsigned rnd = (*zipf_dist)(generator); // RAND_R_FNC(input_seed);
 		unsigned rnd; // RAND_R_FNC(input_seed);
-		if (!fscanf(CPU_input_file, "%i\n", &rnd)) {
+		if (fscanf(CPU_input_file, "%i\n", &rnd) == EOF) {
 			printf("Error reading from file\n");
 		}
 		CPUInputBuffer[i] = rnd % (parsedData.nb_accounts - 40);
@@ -233,17 +221,17 @@ static int fill_CPU_input_buffers()
 	for (int i = 0; i < good_buffers_last; ++i) {
 		// unsigned rnd = (*zipf_dist)(generator); // RAND_R_FNC(input_seed);
 		unsigned rnd;
-		if (!fscanf(CPU_input_file, "%i\n", &rnd)) {
-			printf("Error reading from file\n");
+		if (fscanf(CPU_input_file, "%i\n", &rnd) == EOF) {
+			printf("[%i] CPU error reading from file\n", i);
 		}
 		CPUInputBuffer[i] = CPU_ACCESS(parsedData.nb_accounts - rnd, parsedData.nb_accounts - 40);
 	}
-	// CPUInputBuffer[good_buffers_last] = 0; // deterministic abort
-	for (int i = good_buffers_last; i < bad_buffers_last; ++i) {
+	CPUInputBuffer[good_buffers_last] = 0; // deterministic abort
+	for (int i = good_buffers_last + 1; i < bad_buffers_last; ++i) {
 		// unsigned rnd = (*zipf_dist)(generator); // RAND_R_FNC(input_seed);
 		unsigned rnd; // RAND_R_FNC(input_seed);
-		if (!fscanf(CPU_input_file, "%i\n", &rnd)) {
-			printf("Error reading from file\n");
+		if (fscanf(CPU_input_file, "%i\n", &rnd) == EOF) {
+			printf("[%i] CPU error reading from file\n", i);
 		}
 		CPUInputBuffer[i] = INTERSECT_ACCESS_CPU(parsedData.nb_accounts - rnd, parsedData.nb_accounts-40);
 		// CPUInputBuffer[i] |= 1;

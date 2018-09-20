@@ -1,0 +1,299 @@
+#!/bin/bash
+
+# This starts are bank/scripts
+#cd .. # goes to bank folder
+
+iter=1
+filename_tsx="Bank_TSX"
+filename_tiny="Bank_Tiny"
+
+GPU_PART="1.0"
+CPU_PART="0.0"
+P_INTERSECT="0.0"
+DURATION=12000
+BLOCKS="2 4 8 16 32 64 256 512 1024" # 512
+THREADS="512" #"2 4 8 16 32 64 96 256 320 512 640 768 1024"
+BATCH_SIZE="4"
+SAMPLES=1
+#./makeTM.sh
+
+CPU_THREADS=4
+# LOW_CPU_THREADS=2
+LARGE_HIGH_CPU_THREADS=4
+LARGE_VERY_HIGH_CPU_THREADS=8
+SMALL_HIGH_CPU_THREADS=4
+SMALL_VERY_HIGH_CPU_THREADS=8
+
+rm -f Bank.csv GPUload.csv CPUload.csv
+
+LARGE_DATASET=46656
+SMALL_DATASET=7776
+VSMALL_DATASET=1296
+
+# memcached read only
+
+### TODO: use shared 0, 30, 50
+
+### TODO: find the best combination of parameters
+function doRun_HeTM {
+	make clean ; make CMP_TYPE=COMPRESSED BANK_PART=1 \
+		PR_MAX_RWSET_SIZE=20 LOG_TYPE=${2} USE_TSX_IMPL=1 PROFILE=1 -j 14 BENCH=MEMCD
+	for s in `seq $SAMPLES`
+	do
+		### DO GPU load
+		rm memcd *.o src/*.o ; make simple CMP_TYPE=COMPRESSED BANK_PART=1 \
+			PR_MAX_RWSET_SIZE=20 LOG_TYPE=${2} USE_TSX_IMPL=1 PROFILE=1 -j 14 BENCH=MEMCD \
+			REQUEST_GRANULARITY=500000 REQUEST_GPU=0.5 REQUEST_CPU=0.5
+		timeout 50s ./memcd -n $CPU_THREADS -l 16 -b 512 -x 512 -T 1 -a $DATASET -d $DURATION -N 4 -S 0 -G $GPU_INPUT -C $CPU_INPUT -f GPUload
+		cp GPUload.csv CPUload.csv
+		rm memcd *.o src/*.o ; make simple CMP_TYPE=COMPRESSED BANK_PART=1 \
+			PR_MAX_RWSET_SIZE=20 LOG_TYPE=${2} USE_TSX_IMPL=1 PROFILE=1 -j 14 BENCH=MEMCD \
+			REQUEST_GRANULARITY=500000 REQUEST_GPU=0.6 REQUEST_CPU=0.4
+		timeout 50s ./memcd -n $CPU_THREADS -l 16 -b 512 -x 512 -T 1 -a $DATASET -d $DURATION -N 4 -S 0 -G $GPU_INPUT -C $CPU_INPUT -f GPUload
+		rm memcd *.o src/*.o ; make simple CMP_TYPE=COMPRESSED BANK_PART=1 \
+			PR_MAX_RWSET_SIZE=20 LOG_TYPE=${2} USE_TSX_IMPL=1 PROFILE=1 -j 14 BENCH=MEMCD \
+			REQUEST_GRANULARITY=500000 REQUEST_GPU=0.7 REQUEST_CPU=0.3
+		timeout 50s ./memcd -n $CPU_THREADS -l 16 -b 512 -x 512 -T 1 -a $DATASET -d $DURATION -N 4 -S 0 -G $GPU_INPUT -C $CPU_INPUT -f GPUload
+		rm memcd *.o src/*.o ; make simple CMP_TYPE=COMPRESSED BANK_PART=1 \
+			PR_MAX_RWSET_SIZE=20 LOG_TYPE=${2} USE_TSX_IMPL=1 PROFILE=1 -j 14 BENCH=MEMCD \
+			REQUEST_GRANULARITY=500000 REQUEST_GPU=0.8 REQUEST_CPU=0.2
+		timeout 50s ./memcd -n $CPU_THREADS -l 16 -b 512 -x 512 -T 1 -a $DATASET -d $DURATION -N 4 -S 0 -G $GPU_INPUT -C $CPU_INPUT -f GPUload
+		rm memcd *.o src/*.o ; make simple CMP_TYPE=COMPRESSED BANK_PART=1 \
+			PR_MAX_RWSET_SIZE=20 LOG_TYPE=${2} USE_TSX_IMPL=1 PROFILE=1 -j 14 BENCH=MEMCD \
+			REQUEST_GRANULARITY=500000 REQUEST_GPU=0.9 REQUEST_CPU=0.1
+		timeout 50s ./memcd -n $CPU_THREADS -l 16 -b 512 -x 512 -T 1 -a $DATASET -d $DURATION -N 4 -S 0 -G $GPU_INPUT -C $CPU_INPUT -f GPUload
+		rm memcd *.o src/*.o ; make simple CMP_TYPE=COMPRESSED BANK_PART=1 \
+			PR_MAX_RWSET_SIZE=20 LOG_TYPE=${2} USE_TSX_IMPL=1 PROFILE=1 -j 14 BENCH=MEMCD \
+			REQUEST_GRANULARITY=500000 REQUEST_GPU=1.0 REQUEST_CPU=0.0
+		timeout 50s ./memcd -n $CPU_THREADS -l 16 -b 512 -x 512 -T 1 -a $DATASET -d $DURATION -N 4 -S 0 -G $GPU_INPUT -C $CPU_INPUT -f GPUload
+		### DO CPU load
+		rm memcd *.o src/*.o ; make simple CMP_TYPE=COMPRESSED BANK_PART=1 \
+			PR_MAX_RWSET_SIZE=20 LOG_TYPE=${2} USE_TSX_IMPL=1 PROFILE=1 -j 14 BENCH=MEMCD \
+			REQUEST_GRANULARITY=500000 REQUEST_CPU=0.6 REQUEST_GPU=0.4
+		timeout 50s ./memcd -n $CPU_THREADS -l 16 -b 512 -x 512 -T 1 -a $DATASET -d $DURATION -N 4 -S 0 -G $GPU_INPUT -C $CPU_INPUT -f CPUload
+		rm memcd *.o src/*.o ; make simple CMP_TYPE=COMPRESSED BANK_PART=1 \
+			PR_MAX_RWSET_SIZE=20 LOG_TYPE=${2} USE_TSX_IMPL=1 PROFILE=1 -j 14 BENCH=MEMCD \
+			REQUEST_GRANULARITY=500000 REQUEST_CPU=0.7 REQUEST_GPU=0.3
+		timeout 50s ./memcd -n $CPU_THREADS -l 16 -b 512 -x 512 -T 1 -a $DATASET -d $DURATION -N 4 -S 0 -G $GPU_INPUT -C $CPU_INPUT -f CPUload
+		rm memcd *.o src/*.o ; make simple CMP_TYPE=COMPRESSED BANK_PART=1 \
+			PR_MAX_RWSET_SIZE=20 LOG_TYPE=${2} USE_TSX_IMPL=1 PROFILE=1 -j 14 BENCH=MEMCD \
+			REQUEST_GRANULARITY=500000 REQUEST_CPU=0.8 REQUEST_GPU=0.2
+		timeout 50s ./memcd -n $CPU_THREADS -l 16 -b 512 -x 512 -T 1 -a $DATASET -d $DURATION -N 4 -S 0 -G $GPU_INPUT -C $CPU_INPUT -f CPUload
+		rm memcd *.o src/*.o ; make simple CMP_TYPE=COMPRESSED BANK_PART=1 \
+			PR_MAX_RWSET_SIZE=20 LOG_TYPE=${2} USE_TSX_IMPL=1 PROFILE=1 -j 14 BENCH=MEMCD \
+			REQUEST_GRANULARITY=500000 REQUEST_CPU=0.9 REQUEST_GPU=0.1
+		timeout 50s ./memcd -n $CPU_THREADS -l 16 -b 512 -x 512 -T 1 -a $DATASET -d $DURATION -N 4 -S 0 -G $GPU_INPUT -C $CPU_INPUT -f CPUload
+		rm memcd *.o src/*.o ; make simple CMP_TYPE=COMPRESSED BANK_PART=1 \
+			PR_MAX_RWSET_SIZE=20 LOG_TYPE=${2} USE_TSX_IMPL=1 PROFILE=1 -j 14 BENCH=MEMCD \
+			REQUEST_GRANULARITY=500000 REQUEST_CPU=1.0 REQUEST_GPU=0.0
+		timeout 50s ./memcd -n $CPU_THREADS -l 16 -b 512 -x 512 -T 1 -a $DATASET -d $DURATION -N 4 -S 0 -G $GPU_INPUT -C $CPU_INPUT -f CPUload
+		###
+		mv GPUload.csv ${1}_GPUload_s${s}
+		mv CPUload.csv ${1}_CPUload_s${s}
+	done
+}
+
+# reduces the load in one device, it goes into the shared queue
+function doRun_HeTM_SHARED_noConfl {
+	make clean ; make CMP_TYPE=COMPRESSED BANK_PART=1 \
+		PR_MAX_RWSET_SIZE=20 LOG_TYPE=${2} USE_TSX_IMPL=1 PROFILE=1 -j 14 BENCH=MEMCD
+	for s in `seq $SAMPLES`
+	do
+		### DO GPU load
+		rm memcd *.o src/*.o ; make simple CMP_TYPE=COMPRESSED BANK_PART=1 \
+			PR_MAX_RWSET_SIZE=20 LOG_TYPE=${2} USE_TSX_IMPL=1 PROFILE=1 -j 14 BENCH=MEMCD \
+			REQUEST_GRANULARITY=500000 REQUEST_GPU=0.5 REQUEST_CPU=0.5
+		timeout 50s ./memcd -n $CPU_THREADS -l 16 -b 512 -x 512 -T 1 -a $DATASET -d $DURATION -N 4 -S 0 -G $GPU_INPUT -C $CPU_INPUT -f GPUload
+		cp GPUload.csv CPUload.csv
+		rm memcd *.o src/*.o ; make simple CMP_TYPE=COMPRESSED BANK_PART=1 \
+			PR_MAX_RWSET_SIZE=20 LOG_TYPE=${2} USE_TSX_IMPL=1 PROFILE=1 -j 14 BENCH=MEMCD \
+			REQUEST_GRANULARITY=500000 REQUEST_GPU=0.5 REQUEST_CPU=0.4
+		timeout 50s ./memcd -n $CPU_THREADS -l 16 -b 512 -x 512 -T 1 -a $DATASET -d $DURATION -N 4 -S 0 -G $GPU_INPUT -C $CPU_INPUT -f GPUload
+		rm memcd *.o src/*.o ; make simple CMP_TYPE=COMPRESSED BANK_PART=1 \
+			PR_MAX_RWSET_SIZE=20 LOG_TYPE=${2} USE_TSX_IMPL=1 PROFILE=1 -j 14 BENCH=MEMCD \
+			REQUEST_GRANULARITY=500000 REQUEST_GPU=0.5 REQUEST_CPU=0.3
+		timeout 50s ./memcd -n $CPU_THREADS -l 16 -b 512 -x 512 -T 1 -a $DATASET -d $DURATION -N 4 -S 0 -G $GPU_INPUT -C $CPU_INPUT -f GPUload
+		rm memcd *.o src/*.o ; make simple CMP_TYPE=COMPRESSED BANK_PART=1 \
+			PR_MAX_RWSET_SIZE=20 LOG_TYPE=${2} USE_TSX_IMPL=1 PROFILE=1 -j 14 BENCH=MEMCD \
+			REQUEST_GRANULARITY=500000 REQUEST_GPU=0.5 REQUEST_CPU=0.2
+		timeout 50s ./memcd -n $CPU_THREADS -l 16 -b 512 -x 512 -T 1 -a $DATASET -d $DURATION -N 4 -S 0 -G $GPU_INPUT -C $CPU_INPUT -f GPUload
+		rm memcd *.o src/*.o ; make simple CMP_TYPE=COMPRESSED BANK_PART=1 \
+			PR_MAX_RWSET_SIZE=20 LOG_TYPE=${2} USE_TSX_IMPL=1 PROFILE=1 -j 14 BENCH=MEMCD \
+			REQUEST_GRANULARITY=500000 REQUEST_GPU=0.5 REQUEST_CPU=0.1
+		timeout 50s ./memcd -n $CPU_THREADS -l 16 -b 512 -x 512 -T 1 -a $DATASET -d $DURATION -N 4 -S 0 -G $GPU_INPUT -C $CPU_INPUT -f GPUload
+		rm memcd *.o src/*.o ; make simple CMP_TYPE=COMPRESSED BANK_PART=1 \
+			PR_MAX_RWSET_SIZE=20 LOG_TYPE=${2} USE_TSX_IMPL=1 PROFILE=1 -j 14 BENCH=MEMCD \
+			REQUEST_GRANULARITY=500000 REQUEST_GPU=0.5 REQUEST_CPU=0.0
+		timeout 50s ./memcd -n $CPU_THREADS -l 16 -b 512 -x 512 -T 1 -a $DATASET -d $DURATION -N 4 -S 0 -G $GPU_INPUT -C $CPU_INPUT -f GPUload
+		### DO CPU load
+		rm memcd *.o src/*.o ; make simple CMP_TYPE=COMPRESSED BANK_PART=1 \
+			PR_MAX_RWSET_SIZE=20 LOG_TYPE=${2} USE_TSX_IMPL=1 PROFILE=1 -j 14 BENCH=MEMCD \
+			REQUEST_GRANULARITY=500000 REQUEST_CPU=0.5 REQUEST_GPU=0.4
+		timeout 50s ./memcd -n $CPU_THREADS -l 16 -b 512 -x 512 -T 1 -a $DATASET -d $DURATION -N 4 -S 0 -G $GPU_INPUT -C $CPU_INPUT -f CPUload
+		rm memcd *.o src/*.o ; make simple CMP_TYPE=COMPRESSED BANK_PART=1 \
+			PR_MAX_RWSET_SIZE=20 LOG_TYPE=${2} USE_TSX_IMPL=1 PROFILE=1 -j 14 BENCH=MEMCD \
+			REQUEST_GRANULARITY=500000 REQUEST_CPU=0.5 REQUEST_GPU=0.3
+		timeout 50s ./memcd -n $CPU_THREADS -l 16 -b 512 -x 512 -T 1 -a $DATASET -d $DURATION -N 4 -S 0 -G $GPU_INPUT -C $CPU_INPUT -f CPUload
+		rm memcd *.o src/*.o ; make simple CMP_TYPE=COMPRESSED BANK_PART=1 \
+			PR_MAX_RWSET_SIZE=20 LOG_TYPE=${2} USE_TSX_IMPL=1 PROFILE=1 -j 14 BENCH=MEMCD \
+			REQUEST_GRANULARITY=500000 REQUEST_CPU=0.5 REQUEST_GPU=0.2
+		timeout 50s ./memcd -n $CPU_THREADS -l 16 -b 512 -x 512 -T 1 -a $DATASET -d $DURATION -N 4 -S 0 -G $GPU_INPUT -C $CPU_INPUT -f CPUload
+		rm memcd *.o src/*.o ; make simple CMP_TYPE=COMPRESSED BANK_PART=1 \
+			PR_MAX_RWSET_SIZE=20 LOG_TYPE=${2} USE_TSX_IMPL=1 PROFILE=1 -j 14 BENCH=MEMCD \
+			REQUEST_GRANULARITY=500000 REQUEST_CPU=0.5 REQUEST_GPU=0.1
+		timeout 50s ./memcd -n $CPU_THREADS -l 16 -b 512 -x 512 -T 1 -a $DATASET -d $DURATION -N 4 -S 0 -G $GPU_INPUT -C $CPU_INPUT -f CPUload
+		rm memcd *.o src/*.o ; make simple CMP_TYPE=COMPRESSED BANK_PART=1 \
+			PR_MAX_RWSET_SIZE=20 LOG_TYPE=${2} USE_TSX_IMPL=1 PROFILE=1 -j 14 BENCH=MEMCD \
+			REQUEST_GRANULARITY=500000 REQUEST_CPU=0.5 REQUEST_GPU=0.0
+		timeout 50s ./memcd -n $CPU_THREADS -l 16 -b 512 -x 512 -T 1 -a $DATASET -d $DURATION -N 4 -S 0 -G $GPU_INPUT -C $CPU_INPUT -f CPUload
+		###
+		mv GPUload.csv ${1}_GPUload_s${s}
+		mv CPUload.csv ${1}_CPUload_s${s}
+	done
+}
+
+# reduces the load in one device, it goes into the shared queue
+function doRun_HeTM_SHARED_steal {
+	make clean ; make CMP_TYPE=COMPRESSED BANK_PART=2 \
+		PR_MAX_RWSET_SIZE=20 LOG_TYPE=${2} USE_TSX_IMPL=1 PROFILE=1 -j 14 BENCH=MEMCD
+	for s in `seq $SAMPLES`
+	do
+		### DO GPU load
+		rm memcd *.o src/*.o ; make simple CMP_TYPE=COMPRESSED BANK_PART=2 \
+			PR_MAX_RWSET_SIZE=20 LOG_TYPE=${2} USE_TSX_IMPL=1 PROFILE=1 -j 14 BENCH=MEMCD \
+			REQUEST_GRANULARITY=500000 REQUEST_GPU=0.5 REQUEST_CPU=0.5
+		timeout 50s ./memcd -n $CPU_THREADS -l 16 -b 512 -x 512 -T 1 -a $DATASET -d $DURATION -N 4 -S 0 -G $GPU_INPUT -C $CPU_INPUT -f GPUload
+		cp GPUload.csv CPUload.csv
+		rm memcd *.o src/*.o ; make simple CMP_TYPE=COMPRESSED BANK_PART=2 \
+			PR_MAX_RWSET_SIZE=20 LOG_TYPE=${2} USE_TSX_IMPL=1 PROFILE=1 -j 14 BENCH=MEMCD \
+			REQUEST_GRANULARITY=500000 REQUEST_GPU=0.5 REQUEST_CPU=0.4
+		timeout 50s ./memcd -n $CPU_THREADS -l 16 -b 512 -x 512 -T 1 -a $DATASET -d $DURATION -N 4 -S 0 -G $GPU_INPUT -C $CPU_INPUT -f GPUload
+		rm memcd *.o src/*.o ; make simple CMP_TYPE=COMPRESSED BANK_PART=2 \
+			PR_MAX_RWSET_SIZE=20 LOG_TYPE=${2} USE_TSX_IMPL=1 PROFILE=1 -j 14 BENCH=MEMCD \
+			REQUEST_GRANULARITY=500000 REQUEST_GPU=0.5 REQUEST_CPU=0.3
+		timeout 50s ./memcd -n $CPU_THREADS -l 16 -b 512 -x 512 -T 1 -a $DATASET -d $DURATION -N 4 -S 0 -G $GPU_INPUT -C $CPU_INPUT -f GPUload
+		rm memcd *.o src/*.o ; make simple CMP_TYPE=COMPRESSED BANK_PART=2 \
+			PR_MAX_RWSET_SIZE=20 LOG_TYPE=${2} USE_TSX_IMPL=1 PROFILE=1 -j 14 BENCH=MEMCD \
+			REQUEST_GRANULARITY=500000 REQUEST_GPU=0.5 REQUEST_CPU=0.2
+		timeout 50s ./memcd -n $CPU_THREADS -l 16 -b 512 -x 512 -T 1 -a $DATASET -d $DURATION -N 4 -S 0 -G $GPU_INPUT -C $CPU_INPUT -f GPUload
+		rm memcd *.o src/*.o ; make simple CMP_TYPE=COMPRESSED BANK_PART=2 \
+			PR_MAX_RWSET_SIZE=20 LOG_TYPE=${2} USE_TSX_IMPL=1 PROFILE=1 -j 14 BENCH=MEMCD \
+			REQUEST_GRANULARITY=500000 REQUEST_GPU=0.5 REQUEST_CPU=0.1
+		timeout 50s ./memcd -n $CPU_THREADS -l 16 -b 512 -x 512 -T 1 -a $DATASET -d $DURATION -N 4 -S 0 -G $GPU_INPUT -C $CPU_INPUT -f GPUload
+		rm memcd *.o src/*.o ; make simple CMP_TYPE=COMPRESSED BANK_PART=2 \
+			PR_MAX_RWSET_SIZE=20 LOG_TYPE=${2} USE_TSX_IMPL=1 PROFILE=1 -j 14 BENCH=MEMCD \
+			REQUEST_GRANULARITY=500000 REQUEST_GPU=0.5 REQUEST_CPU=0.0
+		timeout 50s ./memcd -n $CPU_THREADS -l 16 -b 512 -x 512 -T 1 -a $DATASET -d $DURATION -N 4 -S 0 -G $GPU_INPUT -C $CPU_INPUT -f GPUload
+		### DO CPU load
+		rm memcd *.o src/*.o ; make simple CMP_TYPE=COMPRESSED BANK_PART=2 \
+			PR_MAX_RWSET_SIZE=20 LOG_TYPE=${2} USE_TSX_IMPL=1 PROFILE=1 -j 14 BENCH=MEMCD \
+			REQUEST_GRANULARITY=500000 REQUEST_CPU=0.5 REQUEST_GPU=0.4
+		timeout 50s ./memcd -n $CPU_THREADS -l 16 -b 512 -x 512 -T 1 -a $DATASET -d $DURATION -N 4 -S 0 -G $GPU_INPUT -C $CPU_INPUT -f CPUload
+		rm memcd *.o src/*.o ; make simple CMP_TYPE=COMPRESSED BANK_PART=2 \
+			PR_MAX_RWSET_SIZE=20 LOG_TYPE=${2} USE_TSX_IMPL=1 PROFILE=1 -j 14 BENCH=MEMCD \
+			REQUEST_GRANULARITY=500000 REQUEST_CPU=0.5 REQUEST_GPU=0.3
+		timeout 50s ./memcd -n $CPU_THREADS -l 16 -b 512 -x 512 -T 1 -a $DATASET -d $DURATION -N 4 -S 0 -G $GPU_INPUT -C $CPU_INPUT -f CPUload
+		rm memcd *.o src/*.o ; make simple CMP_TYPE=COMPRESSED BANK_PART=2 \
+			PR_MAX_RWSET_SIZE=20 LOG_TYPE=${2} USE_TSX_IMPL=1 PROFILE=1 -j 14 BENCH=MEMCD \
+			REQUEST_GRANULARITY=500000 REQUEST_CPU=0.5 REQUEST_GPU=0.2
+		timeout 50s ./memcd -n $CPU_THREADS -l 16 -b 512 -x 512 -T 1 -a $DATASET -d $DURATION -N 4 -S 0 -G $GPU_INPUT -C $CPU_INPUT -f CPUload
+		rm memcd *.o src/*.o ; make simple CMP_TYPE=COMPRESSED BANK_PART=2 \
+			PR_MAX_RWSET_SIZE=20 LOG_TYPE=${2} USE_TSX_IMPL=1 PROFILE=1 -j 14 BENCH=MEMCD \
+			REQUEST_GRANULARITY=500000 REQUEST_CPU=0.5 REQUEST_GPU=0.1
+		timeout 50s ./memcd -n $CPU_THREADS -l 16 -b 512 -x 512 -T 1 -a $DATASET -d $DURATION -N 4 -S 0 -G $GPU_INPUT -C $CPU_INPUT -f CPUload
+		rm memcd *.o src/*.o ; make simple CMP_TYPE=COMPRESSED BANK_PART=2 \
+			PR_MAX_RWSET_SIZE=20 LOG_TYPE=${2} USE_TSX_IMPL=1 PROFILE=1 -j 14 BENCH=MEMCD \
+			REQUEST_GRANULARITY=500000 REQUEST_CPU=0.5 REQUEST_GPU=0.0
+		timeout 50s ./memcd -n $CPU_THREADS -l 16 -b 512 -x 512 -T 1 -a $DATASET -d $DURATION -N 4 -S 0 -G $GPU_INPUT -C $CPU_INPUT -f CPUload
+		###
+		mv GPUload.csv ${1}_GPUload_s${s}
+		mv CPUload.csv ${1}_CPUload_s${s}
+	done
+}
+
+function doRun_GPUonly {
+	# TODO: for some reason DISABLED is slower...
+	make clean ; make CMP_TYPE=DISABLED BANK_PART=1 CPUEn=0 PROFILE=1 \
+		PR_MAX_RWSET_SIZE=20 -j 14 BENCH=MEMCD \
+		REQUEST_GRANULARITY=500000 REQUEST_GPU=1.0 REQUEST_CPU=0.0
+	for s in `seq $SAMPLES`
+	do
+		### DO GPU load
+		timeout 50s ./memcd -n $CPU_THREADS -l 16 -b 512 -x 512 -T 1 -a $DATASET -d $DURATION -N 4 -S 0 -G $GPU_INPUT -C $CPU_INPUT
+		tail -n 1 Bank.csv > /tmp/BankLastLine.csv
+		cat /tmp/BankLastLine.csv >> Bank.csv # duplicates last line
+		mv Bank.csv ${1}_s${s}
+	done
+}
+
+function doRun_CPUonly {
+	make clean ; make CMP_TYPE=DISABLED BANK_PART=1 USE_TSX_IMPL=1 INST_CPU=0 GPUEn=0 \
+		PROFILE=1 PR_MAX_RWSET_SIZE=20 -j 14 BENCH=MEMCD \
+		REQUEST_GRANULARITY=500000 REQUEST_GPU=0.0 REQUEST_CPU=1.0
+	for s in `seq $SAMPLES`
+	do
+		### DO GPU load
+		timeout 50s ./memcd -n $CPU_THREADS -l 16 -b 512 -x 512 -T 1 -a $DATASET -d $DURATION -N 4 -S 0 -G $GPU_INPUT -C $CPU_INPUT
+		tail -n 1 Bank.csv > /tmp/BankLastLine.csv
+		cat /tmp/BankLastLine.csv >> Bank.csv # duplicates last line
+		mv Bank.csv ${1}_s${s}
+	done
+}
+
+CPU_THREADS=8
+
+cd java_zipf
+SIZE_ZIPF=49999999
+GPU_INPUT="GPU_input_${SIZE_ZIPF}_099_4194304.txt"
+CPU_INPUT="CPU_input_${SIZE_ZIPF}_099_327680.txt"
+if [ ! -f ../$GPU_INPUT ]
+then
+	java Main $LARGE_DATASET 0.99 4194304 > ../$GPU_INPUT
+fi
+if [ ! -f ../$CPU_INPUT ]
+then
+	java Main $LARGE_DATASET 0.99 327680 > ../$CPU_INPUT
+fi
+cd ..
+
+DATASET=$SMALL_DATASET #medium
+
+doRun_HeTM_SHARED_noConfl memcd_SHARED_noConfl_VERS VERS
+doRun_HeTM_SHARED_noConfl memcd_SHARED_noConfl_BMAP BMAP
+
+doRun_HeTM_SHARED_steal memcd_SHARED_steal_VERS VERS
+doRun_HeTM_SHARED_steal memcd_SHARED_steal_BMAP BMAP
+
+doRun_HeTM memcd_VERS VERS
+doRun_HeTM memcd_BMAP BMAP
+
+doRun_GPUonly memcd_GPUonly
+doRun_CPUonly memcd_CPUonly
+
+DATASET=$LARGE_DATASET
+
+doRun_HeTM_SHARED_noConfl memcd_SHARED_noConfl_VERS_LARGE VERS
+doRun_HeTM_SHARED_noConfl memcd_SHARED_noConfl_BMAP_LARGE BMAP
+
+doRun_HeTM_SHARED_steal memcd_SHARED_steal_VERS_LARGE VERS
+doRun_HeTM_SHARED_steal memcd_SHARED_steal_BMAP_LARGE BMAP
+
+doRun_HeTM memcd_VERS_LARGE VERS
+doRun_HeTM memcd_BMAP_LARGE BMAP
+
+doRun_GPUonly memcd_GPUonly_LARGE
+doRun_CPUonly memcd_CPUonly_LARGE
+
+DATASET=$VSMALL_DATASET
+
+doRun_HeTM_SHARED_noConfl memcd_SHARED_noConfl_VERS_SMALL VERS
+doRun_HeTM_SHARED_noConfl memcd_SHARED_noConfl_BMAP_SMALL BMAP
+
+doRun_HeTM_SHARED_steal memcd_SHARED_steal_VERS_SMALL VERS
+doRun_HeTM_SHARED_steal memcd_SHARED_steal_BMAP_SMALL BMAP
+
+doRun_HeTM memcd_VERS_SMALL VERS
+doRun_HeTM memcd_BMAP_SMALL BMAP
+
+doRun_GPUonly memcd_GPUonly_SMALL
+doRun_CPUonly memcd_CPUonly_SMALL

@@ -176,8 +176,10 @@ extern void *HeTM_memStream;
 const int CACHE_GRANULE_SIZE = 2147483648; // 2GB
 const int CACHE_GRANULE_BITS = 31;
 #else /* new one */
-const int CACHE_GRANULE_SIZE = 4096;
-const int CACHE_GRANULE_BITS = 12;
+// const int CACHE_GRANULE_SIZE = 4096;
+// const int CACHE_GRANULE_BITS = 12;
+const int CACHE_GRANULE_SIZE = 32768;
+const int CACHE_GRANULE_BITS = 15;
 #endif /* HETM_OLD_BMAP_IMPL */
 
 #ifdef __cplusplus

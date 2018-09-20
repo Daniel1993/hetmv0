@@ -153,7 +153,7 @@ static void run_checkTxCompressed(knlman_callback_params_s params)
   CUDA_EVENT_RECORD(threadData->cmpStartEvent, stream);
   threadData->didCallCmp = 1;
 #if HETM_LOG_TYPE == HETM_VERS2_LOG
-  // inits 32kB of shared memory
+  // TODO: init 32kB of shared memory (is it needed?)
   HeTM_knl_checkTxCompressed<<<blocks, threads, 0, stream>>>(data->knlArgs);
 #else
   HeTM_knl_checkTxCompressed<<<blocks, threads, 0, stream>>>(data->knlArgs);

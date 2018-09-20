@@ -16,7 +16,7 @@
 const int TOT_NB_THREADS_CPU = 4;
 const int THREADS_PER_BLOCK_GPU = 512;
 const int TOT_NB_BLOCKS_GPU = 256;
-const int MAX_ROUNDS = 5;
+const int MAX_ROUNDS = 20;
 
 static thread_local HETM_LOG_T *CPUlog; // no STM
 static kernel_input_s globalState;
@@ -46,6 +46,11 @@ static void test(int id, void *data)
   }
 	mempoolCPU[pos] = id;
 	stm_log_newentry(CPUlog, (long*)&mempoolCPU[pos], id, globalState.roundId);
+
+	// if (id == 0) {
+	// 	// deterministic conflict
+	// 	stm_log_newentry(CPUlog, (long*)&mempoolCPU[TOT_NB_THREADS_CPU], -1, globalState.roundId);
+	// }
 
 	if (globalState.roundId >= MAX_ROUNDS) {
 		if (id == 0 && !HeTM_is_stop()) {
@@ -79,28 +84,32 @@ static void before_batch(int id, void *data)
 
 static void after_batch(int id, void *data)
 {
-	// printf("check round %i\n", globalState.roundId);
-	CUDA_CPY_TO_DEV(globalStateDevOnGPU, globalStateDev, sizeof(kernel_input_s));
+	printf(" --- ROUND %i FINISHED ---\n", globalState.roundId);
 	for (int i = 0; i < TOT_NB_THREADS_CPU; i++) {
 		if (mempoolCPU[i] != i && (globalState.roundId & 1)) {
-			printf("error on CPU: %i expected but got %i\n", i, mempoolCPU[i]);
+			printf("[%i i=%i] error on CPU: %i expected but got %i\n", globalState.roundId, i,
+				i, mempoolCPU[i]);
 			break;
-		} else if (mempoolCPU[i] != TOT_NB_THREADS_CPU-i-1) {
-			printf("error on CPU: %i expected but got %i\n", i, mempoolCPU[i]);
+		} else if (mempoolCPU[i] != TOT_NB_THREADS_CPU-i-1 && (globalState.roundId & 1 == 0)) {
+			printf("[%i i=%i] error on CPU: %i expected but got %i\n", globalState.roundId, i,
+				TOT_NB_THREADS_CPU-i-1, mempoolCPU[i]);
 			break;
 		}
 	}
 	for (int i = 0; i < THREADS_PER_BLOCK_GPU*TOT_NB_BLOCKS_GPU; i++) {
 		if (mempoolCPU[i+TOT_NB_THREADS_CPU] != i && (globalState.roundId & 1)) {
-			printf("error on GPU: %i expected but got %i\n", i, mempoolCPU[i+TOT_NB_THREADS_CPU]);
+			printf("[%i i=%i] error on GPU: %i expected but got %i\n", globalState.roundId, i,
+				i, mempoolCPU[i+TOT_NB_THREADS_CPU]);
 			break;
-		} else if (mempoolCPU[i+TOT_NB_THREADS_CPU] != THREADS_PER_BLOCK_GPU*TOT_NB_BLOCKS_GPU-i-1) {
-			printf("error on GPU: %i expected but got %i\n", i, mempoolCPU[i+TOT_NB_THREADS_CPU]);
+		} else if (mempoolCPU[i+TOT_NB_THREADS_CPU] != THREADS_PER_BLOCK_GPU*TOT_NB_BLOCKS_GPU-i-1 && (globalState.roundId & 1 == 0) ) {
+			printf("[%i i=%i] error on GPU: %i expected but got %i\n", globalState.roundId, i,
+				THREADS_PER_BLOCK_GPU*TOT_NB_BLOCKS_GPU-i-1, mempoolCPU[i+TOT_NB_THREADS_CPU]);
 			break;
 		}
 	}
 	globalState.roundId++;
 	globalStateDev->roundId++;
+	CUDA_CPY_TO_DEV(globalStateDevOnGPU, globalStateDev, sizeof(kernel_input_s));
 	// TODO: conflict mechanism
 }
 

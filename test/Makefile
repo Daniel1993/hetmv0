@@ -98,6 +98,7 @@ $(APP): $(OBJS)
 		PROFILE=$(PROFILE) \
 		INST_CPU=$(INST_CPU) \
 		HETM_DISABLE_CHUNKS=$(DHETM_DISABLE_CHUNKS) \
+		DISABLE_NON_BLOCKING=$(DISABLE_NON_BLOCKING) \
 		PRINT_DEB=$(PRINT_DEB)
 	@echo " ============================================ "
 	@echo " === Building TinyMOD lib "
