@@ -11,6 +11,10 @@
 #include <list>
 #include <mutex>
 
+#define MINIMUM_DtD_CPY 4194304
+#define MINIMUM_DtH_CPY 262144
+#define MINIMUM_HtD_CPY 262144
+
 #define RUN_ASYNC(_func, _args) \
   HeTM_async_request((HeTM_async_req_s){ \
     .args = (void*)_args, \
@@ -57,8 +61,10 @@ static void offloadAfterCmp(void*);
 static void offloadResetGPUState(void*);
 
 static int isWaitingCpyBack = 0;
+static thread_local HeTM_thread_s *tmp_threadData;
 
 #if HETM_LOG_TYPE == HETM_BMAP_LOG
+static TIMER_T bmapBlockedStart, bmapBlockedEnd;
 static int launchCmpKernel(void*);
 #endif /* HETM_LOG_TYPE != HETM_BMAP_LOG */
 
@@ -163,15 +169,16 @@ loop_gpu_callback:
 loop_wait_on_dataset_cpy_back:
     // waitDatasetEnd(); // waits after lauching kernel again
     runAfterBatch(threadId, (void*)HeTM_thread_data);
-    runBeforeBatch(threadId, (void*)HeTM_thread_data);
-    notifyCPUNextBatch();
 
     HETM_DEB_THRD_GPU(" --- End of batch (%li sucs, %li fail)",
       HeTM_stats_data.nbBatchesSuccess, HeTM_stats_data.nbBatchesFail);
   // }
   if (CONTINUE_COND) {
+    runBeforeBatch(threadId, (void*)HeTM_thread_data);
+    notifyCPUNextBatch();
     goto loop_gpu_batch;
   }
+  notifyCPUNextBatch();
 
   TIMER_READ(t4);
   HeTM_stats_data.timeAfterCMP += TIMER_DIFF_SECONDS(t3, t4);
@@ -206,6 +213,7 @@ void HeTM_gpu_thread()
 
   // first one here, then before notify the CPU
   runBeforeBatch(threadId, (void*)HeTM_thread_data);
+
 loop_gpu_batch:
   // while (CONTINUE_COND) {
     // TODO: prepare syncBatchPolicy
@@ -214,7 +222,6 @@ loop_gpu_batch:
     doGPUStateReset();
     WAIT_ON_FLAG(isGPUResetDone); // forces GPU reset before start
     runBatch();
-
     waitBatchEnd();
 
     TIMER_READ(t2);
@@ -227,17 +234,21 @@ loop_gpu_batch:
 
     HeTM_stats_data.timeCMP += TIMER_DIFF_SECONDS(t2, t3);
 
+// ---------------------
     mergeDataset();
+// ---------------------
     checkIsExit();
 
+// ---------------------
     RUN_ASYNC(beforeSyncDataset, HeTM_thread_data);
     RUN_ASYNC(offloadSyncDatasetAfterBatch, HeTM_thread_data);
-    RUN_ASYNC(offloadWaitDataset, HeTM_thread_data);
+    if (HeTM_shared_data.isCPUEnabled == 1) {
+      RUN_ASYNC(offloadWaitDataset, HeTM_thread_data);
+      WAIT_ON_FLAG(isDatasetSyncDone);
+    }
 
-    WAIT_ON_FLAG(isDatasetSyncDone);
+// ---------------------
     runAfterBatch(threadId, (void*)HeTM_thread_data);
-    runBeforeBatch(threadId, (void*)HeTM_thread_data);
-    notifyCPUNextBatch();
 
     TIMER_READ(t1);
     HeTM_stats_data.timeAfterCMP += TIMER_DIFF_SECONDS(t3, t1);
@@ -246,18 +257,23 @@ loop_gpu_batch:
       HeTM_stats_data.nbBatchesSuccess, HeTM_stats_data.nbBatchesFail);
   // }
   if (CONTINUE_COND) {
+    runBeforeBatch(threadId, (void*)HeTM_thread_data);
+    notifyCPUNextBatch();
     goto loop_gpu_batch;
   }
+  notifyCPUNextBatch();
 
   // TODO: this was per iteration
   // This will run sync
   RUN_ASYNC(offloadGetPRStats, HeTM_thread_data);
   RUN_ASYNC(updateStatisticsAfterBatch, -1);
 
+// ---------------------
   WAIT_ON_FLAG(isWaitingCpyBack);
   WAIT_ON_FLAG(isAfterCmpDone); // avoids a warning in the compiler
   WAIT_ON_FLAG(isGetStatsDone);
   WAIT_ON_FLAG(isGetPRStatsDone);
+// ---------------------
 
   exitThread(threadId, clbkArgs);
 }
@@ -277,6 +293,8 @@ static inline void runBatch()
 
 static inline void runBeforeGPU(int id, void *data)
 {
+  HeTM_shared_data.batchCount = 1;
+  hetm_batchCount = &HeTM_shared_data.batchCount;
   for (auto it = beforeGPU.begin(); it != beforeGPU.end(); ++it) {
     HeTM_callback clbk = *it;
     clbk(id, data);
@@ -301,20 +319,86 @@ static inline void runBeforeBatch(int id, void *data)
 
 static inline void runAfterBatch(int id, void *data)
 {
+  HeTM_shared_data.batchCount++;
+  if ((HeTM_shared_data.batchCount & 0xff) == 0) {
+    HeTM_shared_data.batchCount++;
+  }
+  COMPILER_FENCE();
+  __sync_synchronize();
   for (auto it = afterBatch.begin(); it != afterBatch.end(); ++it) {
     HeTM_callback clbk = *it;
     clbk(id, data);
   }
 }
 
+// host is backup, dev is mempool (both are in device)
+// static void backupTheMempool_fn(void *hostPtr, void *devPtr, size_t cpySize)
+// {
+//   // TODO: D->D GPU+CPU WS
+//   cudaMemcpyAsync(hostPtr, devPtr, cpySize, cudaMemcpyDeviceToDevice,
+//     (cudaStream_t)HeTM_memStream);
+// }
+
+// static void recoverTheMempool_fn(void *hostPtr, void *devPtr, size_t cpySize)
+// {
+//   // TODO: D->D GPU+CPU WS
+//   cudaMemcpyAsync(devPtr, hostPtr, cpySize, cudaMemcpyDeviceToDevice,
+//     (cudaStream_t)(tmp_threadData->stream));
+// }
+
+static void dropGPU_fn(void *hostPtr, void *devPtr, size_t cpySize)
+{
+  // TODO: D->D GPU+CPU WS
+  CUDA_CPY_TO_DEV_ASYNC(devPtr, hostPtr, cpySize, (cudaStream_t)HeTM_memStream);
+}
+
+// static void dropCPU_fn(void *hostPtr, void *devPtr, size_t cpySize)
+// {
+//   // TODO: D->D GPU+CPU WS
+//   CUDA_CPY_TO_HOST_ASYNC(hostPtr, devPtr, cpySize, (cudaStream_t)HeTM_memStream);
+// }
+
+
 static inline void waitBatchEnd()
 {
   PR_waitKernel();
+
+  CUDA_CHECK_ERROR(cudaDeviceSynchronize(), "");
+
+  memman_select("HeTM_mempool");
+  memman_cpy_to_cpu_buffer_bitmap(); // gets what the GPU wrote
 }
 
 static inline void waitCMPEnd()
 {
   HeTM_set_GPU_status(HETM_BATCH_DONE); // notifies
+  __sync_synchronize();
+
+  // waits threads to stop doing validation (VERS)
+  do {
+    COMPILER_FENCE();
+  } while(HeTM_shared_data.threadsWaitingSync != HeTM_shared_data.nbCPUThreads);
+  // at this point the CPU should be blocked
+
+#if HETM_LOG_TYPE == HETM_BMAP_LOG
+  TIMER_READ(bmapBlockedStart);
+#endif /* HETM_LOG_TYPE == HETM_BMAP_LOG */
+
+  // TODO: CPU_INV not working
+// #if HETM_LOG_TYPE == HETM_VERS_LOG
+//   if (HeTM_shared_data.policy == HETM_CPU_INV) {
+//
+//     memman_select("HeTM_mempool");
+//     size_t sizeofMempool;
+//     void *ptrMempool = memman_get_gpu(&sizeofMempool);
+//     memman_select("HeTM_mempool_backup");
+//     void *ptrMempoolBackup = memman_get_gpu(NULL);
+//
+//     memman_smart_cpy(bmapBackup->ptr, bmapBackup->gran, ptrMempoolBackup,
+//       ptrMempool, sizeofMempool, backupTheMempool_fn);
+//   }
+// #endif /* HETM_LOG_TYPE == HETM_VERS_LOG */
+
   HeTM_sync_barrier(); // Blocks and waits comparison kernel to end
 }
 
@@ -349,6 +433,10 @@ static inline void doGPUStateReset()
 static inline void notifyCPUNextBatch()
 {
   HeTM_sync_barrier(); // wakes the threads, GPU will re-run
+#if HETM_LOG_TYPE == HETM_BMAP_LOG
+  TIMER_READ(bmapBlockedEnd);
+  HeTM_stats_data.timeBlocking += TIMER_DIFF_SECONDS(bmapBlockedStart, bmapBlockedEnd) * HeTM_shared_data.nbCPUThreads;
+#endif /* HETM_LOG_TYPE == HETM_BMAP_LOG */
 }
 
 int HeTM_choose_policy(HeTM_callback req)
@@ -418,8 +506,9 @@ void exitThread(int id, void *data)
 
 static void beforeSyncDataset(void*)
 {
-  memman_select("HeTM_mempool");
-  memman_cpy_to_cpu_buffer_bitmap();
+  // cudaMemcpy(bmapBackup->dev, bmap->dev, bmap->div, cudaMemcpyDeviceToDevice);
+  // memman_select("HeTM_mempool_backup");
+  // memman_cpy_to_cpu_buffer_bitmap();
   isWaitingCpyBack = 1;
   __sync_synchronize();
 }
@@ -427,36 +516,122 @@ static void beforeSyncDataset(void*)
 static void offloadSyncDatasetAfterBatch(void *args)
 {
   HeTM_thread_s *threadData = (HeTM_thread_s*)args;
-  size_t datasetCpySize;
+  size_t datasetCpySize = 0;
+
+  tmp_threadData = threadData;
+
+#if HETM_CMP_TYPE == HETM_CMP_DISABLED
+  // if (HeTM_shared_data.isCPUEnabled == 0) {
+#ifndef USE_UNIF_MEM
+    // HeTM_mempool_cpy_to_cpu(&datasetCpySize);
+    memman_select("HeTM_mempool");
+    void *host = memman_get_cpu(&datasetCpySize);
+    void *dev = memman_get_gpu(NULL);
+    cudaMemcpy(host, dev, datasetCpySize, cudaMemcpyDeviceToHost);
+    HeTM_stats_data.sizeCpyDataset += datasetCpySize;
+#endif /* USE_UNIF_MEM */
+    return;
+  // }
+#endif /* HETM_CMP_TYPE == HETM_CMP_DISABLED */
 
   HETM_DEB_THRD_GPU("Syncing dataset ...");
   if (!HeTM_is_interconflict()) { // Successful execution
-    // TODO: take statistic on this
+
+    // GPU-only enters always here
 
     // Transfers the GPU WSet to CPU
-    // TODO: bitmap is not in use (use bitmap to reduce the copyback size)
     CUDA_EVENT_RECORD(threadData->cpyDatasetStartEvent, (cudaStream_t)HeTM_memStream);
-    HeTM_mempool_cpy_to_cpu(&datasetCpySize); // TODO: only in HETM_GPU_INV mode
+
+    HeTM_mempool_cpy_to_cpu(&datasetCpySize);
     HeTM_stats_data.sizeCpyDataset += datasetCpySize;
     CUDA_EVENT_RECORD(threadData->cpyDatasetStopEvent, (cudaStream_t)HeTM_memStream);
+
   } else { // conflict detected
 
     CUDA_EVENT_RECORD(threadData->cpyDatasetStartEvent, (cudaStream_t)HeTM_memStream);
     if (HeTM_shared_data.policy == HETM_GPU_INV) {
-      HeTM_mempool_cpy_to_gpu(&datasetCpySize); // ignores the data from GPU
+
+      // Drop GPU policy
+
+      // copy H->D the region that the GPU damaged
+      memman_select("HeTM_mempool");
+
+#if HETM_LOG_TYPE == HETM_VERS_LOG
+
+      // already copied the CPU-WS, just need to restore the GPU-WS
+
+      memman_cpy_to_gpu(HeTM_memStream, &datasetCpySize);
       HeTM_stats_data.sizeCpyDataset += datasetCpySize;
-    }
-    // TODO: must restore CPU and GPU data --> backup on CPU memory
-    // then: memcpy(mempool, backup); HeTM_mempool_cpy_to_gpu();
-    if (HeTM_shared_data.policy == HETM_CPU_INV) {
-      HeTM_mempool_cpy_to_cpu(&datasetCpySize); // ignores the data from CPU
+#else /* HETM_LOG_TYPE == HETM_BMAP_LOG */
+
+      // BMAP also needs to cpy the CPU-WS
+
+      size_t sizeofMempool;
+      void *cpuMempool = memman_get_cpu(&sizeofMempool);
+      void *gpuMempool = memman_get_gpu(NULL);
+      memman_select("HeTM_mempool_backup_bmap");
+      memman_bmap_s *bmapWS = (memman_bmap_s*)memman_get_cpu(NULL);
+
+      memman_select("HeTM_mempool_bmap");
+      memman_bmap_s *bmap = (memman_bmap_s*)memman_get_cpu(NULL);
+
+      // HeTM_mempool_backup_bmap has the union of GPU-WS with CPU-WS
+      for (int i = 0; i < bmapWS->div; ++i) {
+        // Merges CPU/GPU write-sets
+        bmapWS->ptr[i] |= bmap->ptr[i];
+      }
+
+      datasetCpySize += memman_smart_cpy(bmapWS->ptr, bmapWS->gran, cpuMempool,
+        gpuMempool, sizeofMempool, dropGPU_fn);
       HeTM_stats_data.sizeCpyDataset += datasetCpySize;
+#endif /* HETM_LOG_TYPE == HETM_BMAP_LOG */
     }
+
+    // TODO: CPU_INV not working
+//     if (HeTM_shared_data.policy == HETM_CPU_INV) {
+//
+// #if HETM_LOG_TYPE == HETM_VERS_LOG
+//       // On VERS need to roll-back applied CPU writes
+//       memman_select("HeTM_mempool");
+//       size_t sizeofMempool;
+//       void *ptrMempool = memman_get_gpu(&sizeofMempool);
+//       void *CPUmempool = memman_get_cpu(&sizeofMempool);
+//       memman_select("HeTM_mempool_backup");
+//       void *ptrMempoolBackup = memman_get_gpu(NULL);
+//       memman_select("HeTM_mempool_backup_bmap");
+//       memman_bmap_s *bmapWS = (memman_bmap_s*)memman_get_cpu(NULL);
+//
+//       // Restores the mempool in the GPU
+//       memman_smart_cpy(bmapWS->ptr, bmapWS->gran, ptrMempoolBackup,
+//         ptrMempool, sizeofMempool, recoverTheMempool_fn);
+//
+//       // At the same time can copy from backup to CPU (restore in the CPU)
+//       datasetCpySize += memman_smart_cpy(bmapWS->ptr, bmapWS->gran, CPUmempool,
+//         ptrMempoolBackup, sizeofMempool, dropCPU_fn);
+//       HeTM_stats_data.sizeCpyDataset += datasetCpySize;
+//
+// #else /* HETM_LOG_TYPE == HETM_BMAP_LOG */
+//
+//       memman_select("HeTM_mempool");
+//       size_t sizeofMempool;
+//       void *ptrMempool = memman_get_gpu(&sizeofMempool);
+//       void *CPUmempool = memman_get_cpu(&sizeofMempool);
+//       memman_select("HeTM_mempool_backup_bmap");
+//       memman_bmap_s *bmapWS = (memman_bmap_s*)memman_get_cpu(NULL);
+//
+//       datasetCpySize += memman_smart_cpy(bmapWS->ptr, bmapWS->gran, CPUmempool,
+//         ptrMempool, sizeofMempool, dropCPU_fn);
+//       HeTM_stats_data.sizeCpyDataset += datasetCpySize;
+// #endif /* HETM_LOG_TYPE == HETM_VERS_LOG */
+//
+//     }
     // if (HeTM_shared_data.policy == HETM_CPU_INV)
     CUDA_EVENT_RECORD(threadData->cpyDatasetStopEvent, (cudaStream_t)HeTM_memStream);
   }
-  // TODO: this is an hack for the GPU-only version
-  // if (HeTM_shared_data.isCPUEnabled == 0) HeTM_mempool_cpy_to_gpu();
+
+  memman_select("HeTM_mempool_backup_bmap");
+  memman_bmap_s *bmapBackup = (memman_bmap_s*)memman_get_cpu(NULL);
+  memset(bmapBackup->ptr, 0, bmapBackup->div);
 }
 
 static void offloadWaitDataset(void *args)
@@ -491,7 +666,9 @@ static void offloadGetPRStats(void *argPtr)
 static void offloadAfterCmp(void *args)
 {
 #if HETM_LOG_TYPE == HETM_BMAP_LOG
-  launchCmpKernel(args); // if BMAP blocks and run the kernel
+  if (HeTM_shared_data.isGPUEnabled && HeTM_shared_data.isCPUEnabled) {
+    launchCmpKernel(args); // if BMAP blocks and run the kernel
+  }
 #else /* HETM_LOG_TYPE != HETM_BMAP_LOG */
 
 HeTM_set_is_interconflict(HeTM_get_inter_confl_flag(HeTM_memStream));
@@ -556,8 +733,6 @@ static void updateStatisticsAfterBatch(void *arg)
     }
   }
 
-  choose_policy(0, arg);
-
   if (HeTM_is_interconflict() && HeTM_shared_data.policy == HETM_CPU_INV) {
     // drop CPU TXs
     for (int i = 0; i < HeTM_shared_data.nbCPUThreads; ++i) {
@@ -573,6 +748,8 @@ static void updateStatisticsAfterBatch(void *arg)
       HeTM_shared_data.threadsInfo[i].curNbTxsNonBlocking = 0;
     }
   }
+
+  choose_policy(0, arg); // choose the policy for the next batch
 
   // TODO: now this is done by choose_policy
   // if (HeTM_is_interconflict() && HeTM_shared_data.policy == HETM_GPU_INV) {
@@ -623,6 +800,9 @@ static int launchCmpKernel(void *args)
   int nbThreadsX = 1024;
   int nbBlocksX;
 
+  int threadsPerBlockBitmapGran = 256;
+  int blocksBitmapGran = DEFAULT_BITMAP_GRANULARITY / threadsPerBlockBitmapGran;
+
   // --------------------------
   // COPY BMAP to GPU
 #if HETM_CMP_TYPE == HETM_CMP_COMPRESSED
@@ -631,9 +811,7 @@ static int launchCmpKernel(void *args)
   dim3 threadsPerBlock(nbThreadsX); // each block has nbThreadsX threads
 
   unsigned char *cachedValues;
-  memman_select("HeTM_cpu_wset_cache_confl");
-  memman_zero_gpu(NULL);
-  memman_zero_cpu(NULL);
+  memman_select("HeTM_cpu_wset_cache_confl"); // not zeroed now
   memman_select("HeTM_cpu_wset_cache");
   cachedValues = (unsigned char*)memman_get_cpu(NULL);
 #else /* HETM_CMP_EXPLICIT */
@@ -655,9 +833,17 @@ static int launchCmpKernel(void *args)
   // CHECK FOR CONFLICTS ////////////////////////////////////
   CUDA_EVENT_RECORD(threadData->cmpStartEvent, (cudaStream_t)threadData->stream);
 #if HETM_CMP_TYPE == HETM_CMP_COMPRESSED
-  int cacheNbThreads = 1024;
-  int cacheNbBlocks = HeTM_shared_data.wsetLogSize / cacheNbThreads;
-  if (HeTM_shared_data.wsetLogSize % cacheNbThreads != 0) {
+  // TODO: comparison MUST be cache with cache for best performance
+
+  // int cacheNbThreads = 1024;
+  // int cacheNbBlocks = HeTM_shared_data.wsetLogSize / cacheNbThreads;
+  // if (HeTM_shared_data.wsetLogSize % cacheNbThreads != 0) {
+  //   cacheNbBlocks++;
+  // }
+
+  int cacheNbThreads = 256;
+  int cacheNbBlocks = HeTM_shared_data.nbChunks / cacheNbThreads;
+  if (HeTM_shared_data.nbChunks % cacheNbThreads != 0) {
     cacheNbBlocks++;
   }
   // printf("Launch top level kernel (%i, %i) sizeWset=%lu\n", cacheNbBlocks, cacheNbThreads, HeTM_shared_data.wsetLogSize);
@@ -666,6 +852,7 @@ static int launchCmpKernel(void *args)
       .sizeWSet = (int)HeTM_shared_data.wsetLogSize,
       .sizeRSet = (int)HeTM_shared_data.rsetLogSize,
       .idCPUThr = 0,
+      .batchCount = (unsigned char)HeTM_shared_data.batchCount,
   });
 #else /* HETM_CMP_EXPLICIT */
   HeTM_knl_checkTxBitmap_Explicit<<<blocksCheck, threadsPerBlock, 0, (cudaStream_t)threadData->stream>>>(
@@ -673,6 +860,7 @@ static int launchCmpKernel(void *args)
       .sizeWSet = (int)HeTM_shared_data.wsetLogSize,
       .sizeRSet = (int)HeTM_shared_data.rsetLogSize,
       .idCPUThr = 0,
+      .batchCount = (unsigned char)HeTM_shared_data.batchCount,
   });
 #endif /* HETM_CMP_TYPE == HETM_CMP_COMPRESSED */
   CUDA_EVENT_RECORD(threadData->cmpStopEvent, (cudaStream_t)threadData->stream);
@@ -725,7 +913,7 @@ static int launchCmpKernel(void *args)
 
     cudaStreamSynchronize(currentStream);
     for (int i = 0; i < sizeCache; ++i) {
-      if (conflInGPU[i] != 1) continue;
+      if (conflInGPU[i] != (unsigned char)HeTM_shared_data.batchCount) continue;
 
       bitmapCPUptr = (uintptr_t)bitmapCPU;
       bitmapGPUptr = (uintptr_t)bitmapGPU;
@@ -743,19 +931,21 @@ static int launchCmpKernel(void *args)
     }
 
     for (int i = startIdx; i < sizeCache; ++i) {
-      if (conflInGPU[i] != 1) continue;
+      if (conflInGPU[i] != (unsigned char)HeTM_shared_data.batchCount) continue;
       // --------------------------
-      // TODO: hacked!!! I'm copying only the memory pages
-      // COPY BMAP to GPU (4096 positions)
-      HeTM_knl_checkTxBitmap<<<16, 256, 0, currentStream>>>(
+      // printf("possible conflict found! conflInGPU[%i]=%i cachedValues[%i]=%i bitmapCPUptr[28]=%i\n",
+      //   i, conflInGPU[i], i, cachedValues[i], ((unsigned char*)bitmapCPU)[28]);
+      cudaStreamSynchronize(currentStream);
+      HeTM_knl_checkTxBitmap<<<blocksBitmapGran, threadsPerBlockBitmapGran, 0, currentStream>>>(
         (HeTM_knl_cmp_args_s){
           .sizeWSet = (int)HeTM_shared_data.wsetLogSize,
           .sizeRSet = (int)HeTM_shared_data.rsetLogSize,
           .idCPUThr = 0,
+          .batchCount = (unsigned char)HeTM_shared_data.batchCount,
         }, i * CACHE_GRANULE_SIZE);
 
       for (int j = i+1; j < sizeCache; ++j) {
-        if (conflInGPU[j] != 1) continue;
+        if (conflInGPU[j] != HeTM_shared_data.batchCount) continue;
 
         bitmapCPUptr = (uintptr_t)bitmapCPU;
         bitmapGPUptr = (uintptr_t)bitmapGPU;
@@ -786,6 +976,7 @@ static int launchCmpKernel(void *args)
 #else
   // --------------------------
   // COPY data-set to GPU (values written by the CPU)
+  size_t sizeWSet;
   memman_select("HeTM_mempool_backup");
   CUDA_EVENT_RECORD(threadData->cpyWSetStartEvent, (cudaStream_t)HeTM_memStream);
   memman_cpy_to_gpu(HeTM_memStream, &sizeWSet); // TODO: put this in other stream
@@ -827,17 +1018,14 @@ static int launchCmpKernel(void *args)
     // only copy the WSet where CPU and GPU conflict --> run kernel if at least 1 exists
     // merge contiguous pages
     for (int i = 0; i < sizeCache; ++i) {
-      if (conflInGPU[i] != 1 || cachedValues[i] != 1) continue;
+      if (conflInGPU[i] != (unsigned char)HeTM_shared_data.batchCount ||
+          cachedValues[i] != (unsigned char)HeTM_shared_data.batchCount) continue;
       // the two accessed the same page
 
-      size_t size_cache_chunk = CACHE_GRANULE_SIZE * PR_LOCK_GRANULARITY;
+      size_t size_cache_chunk = CACHE_GRANULE_SIZE;
       size_t size_to_cpy = size_cache_chunk;
 
       if (size_to_cpy + i * size_cache_chunk > sizeCPUMempool) {
-        // if (i * size_cache_chunk > sizeCPUMempool) {
-        //   // TODO: this is a BUG
-        //   break;
-        // }
         size_to_cpy = sizeCPUMempool - i * size_cache_chunk; // else copies beyond the buffer
       }
 
@@ -850,14 +1038,15 @@ static int launchCmpKernel(void *args)
         size_to_cpy, currentStream);
 
       // ---------
-      HeTM_stats_data.sizeCpyWSet += CACHE_GRANULE_SIZE * PR_LOCK_GRANULARITY;
+      HeTM_stats_data.sizeCpyWSet += size_to_cpy;
       // ---------
 
-      HeTM_knl_writeTxBitmap<<<16, 256, 0, currentStream>>>(
+      HeTM_knl_writeTxBitmap<<<blocksBitmapGran, threadsPerBlockBitmapGran, 0, currentStream>>>(
         (HeTM_knl_cmp_args_s){
           .sizeWSet = (int)HeTM_shared_data.wsetLogSize,
           .sizeRSet = (int)HeTM_shared_data.rsetLogSize,
           .idCPUThr = 0,
+          .batchCount = (unsigned char)HeTM_shared_data.batchCount,
         }, i * CACHE_GRANULE_SIZE);
       tmp = currentStream;
       currentStream = nextStream;
@@ -871,27 +1060,32 @@ static int launchCmpKernel(void *args)
     GPUDataset = memman_get_gpu(&sizeOfGPUDataset); // this is the right one
 
     for (int cont = 1, i = 0; i < sizeCache; i += cont) {
-      if (cachedValues[i] != 1 || conflInGPU[i] == 1) continue; // not modified or conflict handled
+      if (cachedValues[i] != (unsigned char)HeTM_shared_data.batchCount
+          || conflInGPU[i] == (unsigned char)HeTM_shared_data.batchCount) continue; // not modified or conflict handled
       cont = 1;
       for (int j = i+1; j < sizeCache; ++j) {
-        if (cachedValues[j] != 1 || conflInGPU[j] == 1) break; // done
+        if (cachedValues[j] != (unsigned char)HeTM_shared_data.batchCount
+            || conflInGPU[j] == (unsigned char)HeTM_shared_data.batchCount) {
+          break; // done
+        }
         cont++;
       }
 
+      // TODO: moved cache granularity from accounts to bytes
       CPUptr = (uintptr_t)CPUDataset;
       GPUptr = (uintptr_t)GPUDataset;
-      CPUptr += i * CACHE_GRANULE_SIZE * PR_LOCK_GRANULARITY;
-      GPUptr += i * CACHE_GRANULE_SIZE * PR_LOCK_GRANULARITY;
+      CPUptr += i * CACHE_GRANULE_SIZE; //* PR_LOCK_GRANULARITY;
+      GPUptr += i * CACHE_GRANULE_SIZE; //* PR_LOCK_GRANULARITY;
 
-      size_t size_to_copy = cont * CACHE_GRANULE_SIZE * PR_LOCK_GRANULARITY;
+      size_t size_to_copy = cont * CACHE_GRANULE_SIZE; //* PR_LOCK_GRANULARITY;
 
       // ----------------
       HeTM_stats_data.sizeCpyWSet += size_to_copy;
       // ----------------
 
       if (i+cont == sizeCache) {
-        size_t size_of_last = sizeOfGPUDataset % (CACHE_GRANULE_SIZE * PR_LOCK_GRANULARITY);
-        size_to_copy = (cont-1) * CACHE_GRANULE_SIZE * PR_LOCK_GRANULARITY + size_of_last;
+        size_t size_of_last = sizeOfGPUDataset % (CACHE_GRANULE_SIZE);
+        size_to_copy = (cont-1) * CACHE_GRANULE_SIZE + size_of_last;
       }
       CUDA_CPY_TO_DEV_ASYNC((void*)GPUptr, (void*)CPUptr, size_to_copy, (cudaStream_t)HeTM_memStream);
     }
@@ -902,6 +1096,7 @@ static int launchCmpKernel(void *args)
         .sizeWSet = (int)HeTM_shared_data.wsetLogSize,
         .sizeRSet = (int)HeTM_shared_data.rsetLogSize,
         .idCPUThr = 0,
+        .batchCount = (unsigned char)HeTM_shared_data.batchCount,
       }, 0);
 #endif /* HETM_CMP_TYPE != HETM_CMP_COMPRESSED */
     NVTX_PUSH_RANGE("wait write", 3);
@@ -919,7 +1114,8 @@ static int launchCmpKernel(void *args)
 #ifndef HETM_OVERLAP_CPY_BACK
   // TODO: zero cache set cache to 1
   // TODO: --> do a +1 on the bitmap and avoid memset to 0 (only once every 255 batches)
-  if (HeTM_is_interconflict()) { // TODO: causes false conflicts
+  // if (HeTM_is_interconflict()) { // TODO: causes false conflicts
+  if ((HeTM_shared_data.batchCount & 0xff) == 0xff) { // at some round --> reset
     memman_select("HeTM_cpu_wset");
     memman_zero_cpu(NULL); // this is slow!
   }

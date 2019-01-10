@@ -23,7 +23,8 @@
 typedef enum {
   HETM_BATCH_RUN  = 0,
   HETM_BATCH_DONE = 1,
-  HETM_IS_EXIT    = 2
+  HETM_IS_EXIT    = 2,
+  HETM_GPU_IDLE   = 3
 } HETM_GPU_STATE;
 
 typedef enum {
@@ -116,6 +117,7 @@ typedef struct HeTM_shared_
   void *devMemPoolShadow;
   void *devChunks;
   void *devMemPoolBackup; // only for HETM_ADDR_LOG and HETM_BMAP_LOG
+  void *devMemPoolBackupBmap;
   size_t sizeMemPool;
 
   // inter-conflict flag
@@ -128,7 +130,7 @@ typedef struct HeTM_shared_
   // BMAP only, stores a cache for the wsetLog
   void *wsetCache;
   void *wsetCacheConfl;
-  size_t wsetCacheSize, wsetCacheBits;
+  size_t wsetCacheSize, wsetCacheBits, nbChunks;
 
   // TODO: remove this is benchmark specific
   void *devCurandState; // type is curandState*
@@ -138,6 +140,10 @@ typedef struct HeTM_shared_
   pthread_t asyncThread;
 
   cudaEvent_t batchStartEvent, batchStopEvent;
+
+  long threadsWaitingSync;
+
+  long batchCount;
 
 } HeTM_shared_s;
 
@@ -178,8 +184,8 @@ const int CACHE_GRANULE_BITS = 31;
 #else /* new one */
 // const int CACHE_GRANULE_SIZE = 4096;
 // const int CACHE_GRANULE_BITS = 12;
-const int CACHE_GRANULE_SIZE = 32768;
-const int CACHE_GRANULE_BITS = 15;
+const int CACHE_GRANULE_SIZE = DEFAULT_BITMAP_GRANULARITY;// 16384;
+const int CACHE_GRANULE_BITS = DEFAULT_BITMAP_GRANULARITY_BITS;// 14;
 #endif /* HETM_OLD_BMAP_IMPL */
 
 #ifdef __cplusplus
@@ -229,6 +235,7 @@ int HeTM_after_cpu_finish(HeTM_callback);
 int HeTM_before_gpu_start(HeTM_callback);
 int HeTM_after_gpu_finish(HeTM_callback);
 
+// choose the policy for the next batch
 int HeTM_choose_policy(HeTM_callback);
 
 // neither CPU nor GPU are running (executes after HeTM_after_batch)

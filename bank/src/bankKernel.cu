@@ -174,7 +174,6 @@ __device__ void readIntensive_tx(PR_txCallDefArgs, int txCount)
 		resF += (float)PR_read(accounts + idx[j]) * INTEREST_RATE;
 		// resF = cos(resF);
 
-		if (pr_args.is_abort) break;
 #else /* PR-STM disabled */
 		resF += accounts[idx[j]];
 #endif
@@ -184,7 +183,6 @@ __device__ void readIntensive_tx(PR_txCallDefArgs, int txCount)
 
 	__syncthreads();
 #ifndef BANK_DISABLE_PRSTM
-	if (pr_args.is_abort) { PR_txRestart(); } // optimization
 	// TODO: writes in the beginning (less transfers)
 	PR_write(accounts + idx[0], resI); //write changes to write set
 
@@ -194,13 +192,11 @@ __device__ void readIntensive_tx(PR_txCallDefArgs, int txCount)
 	// int target = (id * 2) % nbAccounts;
 	// PR_write(accounts + target, resI); //write changes to write set
 
-	if (pr_args.is_abort) { PR_txRestart(); }
 #else /* PR-STM disabled */
 	accounts[idx[0]] = resI; //write changes to write set
 #endif
 
 #ifndef BANK_DISABLE_PRSTM
-	if (pr_args.is_abort) { PR_txRestart(); } // optimization
 	PR_txCommit();
 #else
 	if (args.nbCommits != NULL) args.nbCommits[PR_THREAD_IDX]++;
@@ -222,7 +218,6 @@ __device__ void readOnly_tx(PR_txCallDefArgs, int txCount)
 	int option = PR_rand(INT_MAX);
 	int tot_nb_threads = blockDim.x*gridDim.x;
 
-	__syncthreads();
 	idx[0] = (input_buffer[id+txCount*tot_nb_threads]) % nbAccounts;
 	#pragma unroll
 	for (i = 1; i < read_intensive_size; i++) {
@@ -251,8 +246,6 @@ __device__ void readOnly_tx(PR_txCallDefArgs, int txCount)
 		// int targetAccount = idx[j] % (nbAccounts / devParsedData.access_controller);
 		resF += (float)PR_read(accounts + idx[j]) * INTEREST_RATE;
 		// resF = cos(resF);
-
-		if (pr_args.is_abort) break;
 #else /* PR-STM disabled */
 		resF += accounts[idx[j]];
 #endif
@@ -260,18 +253,14 @@ __device__ void readOnly_tx(PR_txCallDefArgs, int txCount)
 	resF += 1.0; // adds at least 1
 	// resI = (int)resF;
 
-	__syncthreads();
 // #ifndef BANK_DISABLE_PRSTM
-// 	if (pr_args.is_abort) { PR_txRestart(); } // optimization
 // 	// TODO: writes in the beginning (less transfers)
 // 	PR_write(accounts + idx[0], resI); //write changes to write set
-// 	if (pr_args.is_abort) { PR_txRestart(); }
 // #else /* PR-STM disabled */
 // 	accounts[idx[0]] = resI; //write changes to write set
 // #endif
 
 #ifndef BANK_DISABLE_PRSTM
-	if (pr_args.is_abort) { PR_txRestart(); } // optimization
 	PR_txCommit();
 #else /* BANK_DISABLE_PRSTM */
 	if (args.nbCommits != NULL) args.nbCommits[PR_THREAD_IDX]++;
@@ -323,7 +312,6 @@ __device__ void update_tx(PR_txCallDefArgs, int txCount)
 		}
 #ifndef BANK_DISABLE_PRSTM
 		count_amount += PR_read(accounts + idx[j]);
-		if (pr_args.is_abort) break; // exits the inner for loop
 #else /* PR-STM disabled */
 		count_amount += accounts[idx[j]];
 #endif
@@ -338,10 +326,11 @@ __device__ void update_tx(PR_txCallDefArgs, int txCount)
 		}
 		// nval = COMPUTE_TRANSFER(reads[target] - 1); // -money
 		nval = COMPUTE_TRANSFER(count_amount - 1); // -money
-		if (idx[target] < nbAccounts / devParsedData.access_controller) {
+
+		// nbAccounts / devParsedData.access_controller
+		if (idx[target] < nbAccounts) {
 #ifndef BANK_DISABLE_PRSTM
 		PR_write(accounts + idx[target], nval); //write changes to write set
-		if (pr_args.is_abort) break;
 #else /* PR-STM disabled */
 		accounts[idx[target]] = nval; //write changes to write set
 #endif
@@ -353,14 +342,11 @@ __device__ void update_tx(PR_txCallDefArgs, int txCount)
 // 		nval = COMPUTE_TRANSFER(reads[target] + 1); // +money
 // #ifndef BANK_DISABLE_PRSTM
 // 		PR_write(accounts + idx[target], nval); //write changes to write set
-// 		if (pr_args.is_abort) break;
 // #else /* PR-STM disabled */
 // 		accounts[idx[target]] = nval; //write changes to write set
 // #endif
-// 		if (pr_args.is_abort) break; // exits the inner (2x) for-loop
 	// }
 #ifndef BANK_DISABLE_PRSTM
-	if (pr_args.is_abort) { PR_txRestart(); }
 	PR_txCommit();
 #else
 	if (args.nbCommits != NULL) args.nbCommits[PR_THREAD_IDX]++;
@@ -408,13 +394,11 @@ __device__ void updateReadOnly_tx(PR_txCallDefArgs, int txCount)
 		}
 #ifndef BANK_DISABLE_PRSTM
 		reads[j] = PR_read(accounts + idx[j]);
-		if (pr_args.is_abort) break; // exits the inner for loop
 #else /* PR-STM disabled */
 		reads[j] = accounts[idx[j]];
 #endif
 	}
 #ifndef BANK_DISABLE_PRSTM
-	if (pr_args.is_abort) { PR_txRestart(); }
 	PR_txCommit();
 #else
 	if (args.nbCommits != NULL) args.nbCommits[PR_THREAD_IDX]++;
@@ -433,7 +417,8 @@ __device__ void updateReadOnly_tx(PR_txCallDefArgs, int txCount)
 */
 __global__ void bankTx(PR_globalKernelArgs)
 {
-	PR_enterKernel();
+	int tid = PR_THREAD_IDX;
+	PR_enterKernel(tid);
 
 	int i = 0; //how many transactions one thread need to commit
 	// HeTM_bankTx_input_s *input = (HeTM_bankTx_input_s*)args.inBuf;
@@ -444,7 +429,7 @@ __global__ void bankTx(PR_globalKernelArgs)
   // TODO: it was txsPerGPUThread * iterations
 	for (i = 0; i < txsPerGPUThread; ++i) { // each thread need to commit x transactions
 
-		// __syncthreads();
+		__syncthreads();
 		if (option % 100 < prec_read_intensive) {
 			// TODO:
 			if (option2 % 100 < devParsedData.prec_write_txs) { // prec read-only
@@ -453,12 +438,23 @@ __global__ void bankTx(PR_globalKernelArgs)
 				readOnly_tx(PR_txCallArgs, i);
 			}
 		} else {
+			// Enters here with -R == 0
+#if BANK_PART == 5
+			int curr_tx = (threadIdx.x+blockDim.x*blockIdx.x) * txsPerGPUThread + i;
+			if (curr_tx < (float)devParsedData.prec_write_txs*0.01*
+					(devParsedData.GPUthreadNum*devParsedData.GPUblockNum*txsPerGPUThread)) {
+				update_tx(PR_txCallArgs, i);
+			} else {
+				readOnly_tx(PR_txCallArgs, i);
+			}
+#else /* BANK_PART == 5 */
 			if (option2 % 100 < devParsedData.prec_write_txs) { // prec read-only
 				update_tx(PR_txCallArgs, i);
 			} else {
 				readOnly_tx(PR_txCallArgs, i);
 				// updateReadOnly_tx(PR_txCallArgs, i);
 			}
+#endif /* BANK_PART == 5 */
 		}
 	}
 
@@ -492,7 +488,8 @@ __global__
 // __launch_bounds__(1024, 1) // TODO: what is this for?
 void memcdReadTx(PR_globalKernelArgs)
 {
-	PR_enterKernel();
+	int tid = PR_THREAD_IDX;
+	PR_enterKernel(tid);
 
 	int id = threadIdx.x+blockDim.x*blockIdx.x;
 	int wayId = id % (num_ways /*+ devParsedData.trans*/);
@@ -588,7 +585,8 @@ void memcdReadTx(PR_globalKernelArgs)
  **********************************/
 __global__ void memcdWriteTx(PR_globalKernelArgs)
 {
-	PR_enterKernel();
+	int tid = PR_THREAD_IDX;
+	PR_enterKernel(tid);
 
 	// TODO: blockDim.x must be multiple of num_ways --> else this does not work
 	int id = threadIdx.x+blockDim.x*blockIdx.x;

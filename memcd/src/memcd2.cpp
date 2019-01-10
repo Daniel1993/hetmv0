@@ -27,6 +27,12 @@ size_t accountsSize;
 size_t sizePool;
 void* gpuMempool;
 
+static int probStealBatch = 0;
+static int isCPUBatchSteal = 0;
+static int isGPUBatchSteal = 0;
+
+static unsigned memcached_global_clock = 0;
+
 #ifndef REQUEST_LATENCY
 #define REQUEST_LATENCY 10.0
 #endif /* REQUEST_LATENCY */
@@ -47,7 +53,7 @@ void* gpuMempool;
 
 // -----------------------------------------------------------------------------
 
-const static int NB_OF_GPU_BUFFERS = 2; // GPU receives some more space
+const static int NB_OF_GPU_BUFFERS = 4; // GPU receives some more space
 const static int NB_CPU_TXS_PER_THREAD = 8192;
 static int NB_GPU_TXS; // must be loaded at run time
 
@@ -84,7 +90,7 @@ FILE *CPU_input_file = NULL;
 
 static int fill_GPU_input_buffers()
 {
-	int buffer_last = size_of_GPU_input_buffer/sizeof(int);
+	int buffer_last = size_of_GPU_input_buffer/4/sizeof(int);
 	GPU_input_file = fopen(parsedData.GPUInputFile, "r");
 
 	// if (zipf_dist == NULL) {
@@ -92,7 +98,7 @@ static int fill_GPU_input_buffers()
 	// 	zipf_dist = new zipf_distribution<int, double>(parsedData.nb_accounts * parsedData.num_ways);
 	// }
 
-	memman_select("GPU_input_buffer_good");
+	memman_select("GPU_input_buffer_good1");
 	int *cpu_ptr = (int*)memman_get_cpu(NULL);
 
 #if BANK_PART == 1 /* shared queue is %3 == 2 */
@@ -103,19 +109,39 @@ static int fill_GPU_input_buffers()
 			printf("ERROR GPU reached end-of-file at %i / %i\n", i, buffer_last);
 		}
 		int mod = rnd % 3;
-		cpu_ptr[i] = rnd - mod; // gives always 0 (mod 3)
+		cpu_ptr[i] = (rnd - mod) + 2; // gives always 2 (mod 3) //2*i;//
 	}
 
-	memman_select("GPU_input_buffer_bad");
+	memman_select("GPU_input_buffer_good2");
 	cpu_ptr = (int*)memman_get_cpu(NULL);
-
 	for (int i = 0; i < buffer_last; ++i) {
 		if (fscanf(GPU_input_file, "%i\n", &rnd) == EOF) {
 			printf("ERROR GPU reached end-of-file at %i / %i\n", i, buffer_last);
 		}
 		int mod = rnd % 3;
-		cpu_ptr[i] = (rnd - mod) + 2; // gives always 2 (mod 3)
+		cpu_ptr[i] = (rnd - mod) + 2; // gives always 2 (mod 3) //2*i;//
 	}
+
+	memman_select("GPU_input_buffer_bad1");
+	cpu_ptr = (int*)memman_get_cpu(NULL);
+	for (int i = 0; i < buffer_last; ++i) {
+		if (fscanf(GPU_input_file, "%i\n", &rnd) == EOF) {
+			printf("ERROR GPU reached end-of-file at %i / %i\n", i, buffer_last);
+		}
+		int mod = rnd % 3;
+		cpu_ptr[i] = (rnd - mod) + 1; // gives always 0 (mod 3) //2*i+1;//
+	}
+
+	memman_select("GPU_input_buffer_bad2");
+	cpu_ptr = (int*)memman_get_cpu(NULL);
+	for (int i = 0; i < buffer_last; ++i) {
+		if (fscanf(GPU_input_file, "%i\n", &rnd) == EOF) {
+			printf("ERROR GPU reached end-of-file at %i / %i\n", i, buffer_last);
+		}
+		int mod = rnd % 3;
+		cpu_ptr[i] = (rnd - mod) + 2; // gives always 2 (mod 3) //2*i+1;//
+	}
+
 #else /* BANK_PART == 2 shared queue is the other device */
 	unsigned rnd; // = (*zipf_dist)(generator);
 	for (int i = 0; i < buffer_last; ++i) {
@@ -123,10 +149,20 @@ static int fill_GPU_input_buffers()
 			printf("ERROR GPU reached end-of-file at %i / %i\n", i, buffer_last);
 		}
 		int mod = rnd % 2;
-		cpu_ptr[i] = (rnd - mod);
+		cpu_ptr[i] = (rnd - mod);//2*i;//
 	}
 
-	memman_select("GPU_input_buffer_bad");
+	memman_select("GPU_input_buffer_good2");
+	cpu_ptr = (int*)memman_get_cpu(NULL);
+	for (int i = 0; i < buffer_last; ++i) {
+		if (fscanf(GPU_input_file, "%i\n", &rnd) == EOF) {
+			printf("ERROR GPU reached end-of-file at %i / %i\n", i, buffer_last);
+		}
+		int mod = rnd % 2;
+		cpu_ptr[i] = (rnd - mod);//2*i;//
+	}
+
+	memman_select("GPU_input_buffer_bad1");
 	cpu_ptr = (int*)memman_get_cpu(NULL);
 
 	for (int i = 0; i < buffer_last; ++i) {
@@ -134,7 +170,18 @@ static int fill_GPU_input_buffers()
 			printf("ERROR GPU reached end-of-file at %i / %i\n", i, buffer_last);
 		}
 		int mod = rnd % 2;
-		cpu_ptr[i] = (rnd - mod) + 1; // gets input from the CPU
+		cpu_ptr[i] = (rnd - mod) + 1; // gets input from the CPU //2*i+1;//
+	}
+
+	memman_select("GPU_input_buffer_bad2");
+	cpu_ptr = (int*)memman_get_cpu(NULL);
+
+	for (int i = 0; i < buffer_last; ++i) {
+		if (fscanf(GPU_input_file, "%i\n", &rnd) == EOF) {
+			printf("ERROR GPU reached end-of-file at %i / %i\n", i, buffer_last);
+		}
+		int mod = rnd % 2;
+		cpu_ptr[i] = (rnd - mod) + 1; // gets input from the CPU //2*i+1;//
 	}
 #endif
 }
@@ -157,7 +204,7 @@ static int fill_CPU_input_buffers()
 			printf("ERROR CPU reached end-of-file at %i / %i\n", i, good_buffers_last);
 		}
 		int mod = rnd % 3;
-		CPUInputBuffer[i] = (rnd - mod) + 1;
+		CPUInputBuffer[i] = (rnd - mod); // 2*i+1;//
 	}
 	for (int i = good_buffers_last; i < bad_buffers_last; ++i) {
 		unsigned rnd;
@@ -165,7 +212,7 @@ static int fill_CPU_input_buffers()
 			printf("ERROR CPU reached end-of-file at %i / %i\n", i, bad_buffers_last);
 		}
 		int mod = rnd % 3;
-		CPUInputBuffer[i] = (rnd - mod) + 2;
+		CPUInputBuffer[i] = (rnd - mod) + 1; //2*i;//
 	}
 #else /* BANK_PART == 2 shared queue is the other device */
 	for (int i = 0; i < good_buffers_last; ++i) {
@@ -174,7 +221,7 @@ static int fill_CPU_input_buffers()
 			printf("ERROR CPU reached end-of-file at %i / %i\n", i, good_buffers_last);
 		}
 		int mod = rnd % 2;
-		CPUInputBuffer[i] = (rnd - mod) + 1;
+		CPUInputBuffer[i] = (rnd - mod) + 1; //2*i+1;//
 	}
 	for (int i = good_buffers_last; i < bad_buffers_last; ++i) {
 		unsigned rnd;
@@ -182,7 +229,7 @@ static int fill_CPU_input_buffers()
 			printf("ERROR CPU reached end-of-file at %i / %i\n", i, bad_buffers_last);
 		}
 		int mod = rnd % 2;
-		CPUInputBuffer[i] = (rnd - mod); // gets input from the GPU
+		CPUInputBuffer[i] = (rnd - mod); // gets input from the GPU //2*i;//
 	}
 #endif
 }
@@ -211,7 +258,7 @@ static void produce_input()
 	// 	printf("[%2i] start=%9li end=%9li\n", i, startInputPtr[i], endInputPtr[i]);
 	// }
 	__sync_synchronize(); // memory fence
-	wait_ms(REQUEST_LATENCY); 
+	wait_ms(REQUEST_LATENCY);
 	if (!HeTM_is_stop()) {
 		produce_input();
 	}
@@ -229,7 +276,7 @@ memcd_get_output_t cpu_GET_kernel(memcd_t *memcd, int *input_key, unsigned input
 	int sizeCache = memcd->nbSets*memcd->nbWays;
 
 	// 1) hash key
-	modHash = key;
+	modHash = key % memcd->nbSets;
 	// TODO: this would be nice, but we lose control of where the key goes to
 	// memset(key, 0, size_of_hash);
 	// memcpy(key, input_key, sizeof(int));
@@ -237,18 +284,25 @@ memcd_get_output_t cpu_GET_kernel(memcd_t *memcd, int *input_key, unsigned input
 	// modHash = hash[0];
 	// modHash += hash[1];
 
+#if BANK_PART == 1 /* use MOD 3 */
+	setIdx = (modHash / 3 + (modHash % 3) * (memcd->nbSets / 3)) % memcd->nbSets;
+#else /* use MOD 2 */
+	setIdx = (modHash / 2 + (modHash % 2) * (memcd->nbSets / 2)) % memcd->nbSets;
+#endif
+	// setIdx = modHash;
+
 	// 2) setIdx <- hash % nbSets
-	setIdx = modHash % memcd->nbSets;
 	setIdx = setIdx * memcd->nbWays;
+	int mod_set = setIdx;
 
 	for (int i = 0; i < memcd->nbWays; ++i) {
 		size_t newIdx = setIdx + i;
 		__builtin_prefetch(&memcd->state[newIdx], 0, 1);
 		__builtin_prefetch(&memcd->key[newIdx], 0, 1);
-		__builtin_prefetch(&memcd->extraKey[newIdx], 0, 1);
-		__builtin_prefetch(&memcd->extraKey[newIdx+sizeCache], 0, 1);
-		__builtin_prefetch(&memcd->extraKey[newIdx+2*sizeCache], 0, 1);
-		__builtin_prefetch(&memcd->ts[newIdx], 1, 1);
+		// __builtin_prefetch(&memcd->extraKey[newIdx], 0, 1);
+		// __builtin_prefetch(&memcd->extraKey[newIdx+sizeCache], 0, 1);
+		// __builtin_prefetch(&memcd->extraKey[newIdx+2*sizeCache], 0, 1);
+		__builtin_prefetch(&memcd->ts_CPU[newIdx], 1, 1);
 		__builtin_prefetch(&memcd->val[newIdx], 0, 1);
 		// __builtin_prefetch(&memcd->extraVal[newIdx], 0, 1);
 		// __builtin_prefetch(&memcd->extraVal[newIdx+sizeCache], 0, 1);
@@ -275,17 +329,19 @@ memcd_get_output_t cpu_GET_kernel(memcd_t *memcd, int *input_key, unsigned input
 				&& readKey2 == key && readKey3 == key) {
 			// found it!
 			int readVal = TM_LOAD(&memcd->val[newIdx]);
-			// int readVal1 = TM_LOAD(&memcd->extraVal[newIdx]);
-			// int readVal2 = TM_LOAD(&memcd->extraVal[newIdx+sizeCache]);
-			// int readVal3 = TM_LOAD(&memcd->extraVal[newIdx+2*sizeCache]);
-			// int readVal4 = TM_LOAD(&memcd->extraVal[newIdx+3*sizeCache]);
-			// int readVal5 = TM_LOAD(&memcd->extraVal[newIdx+4*sizeCache]);
-			// int readVal6 = TM_LOAD(&memcd->extraVal[newIdx+5*sizeCache]);
-			// int readVal7 = TM_LOAD(&memcd->extraVal[newIdx+6*sizeCache]);
-			int* volatile ptr_ts = &memcd->ts[newIdx];
-			TM_STORE(ptr_ts, input_clock); // TODO: set state to isRead
+			int readVal1 = TM_LOAD(&memcd->extraVal[newIdx]);
+			int readVal2 = TM_LOAD(&memcd->extraVal[newIdx+sizeCache]);
+			int readVal3 = TM_LOAD(&memcd->extraVal[newIdx+2*sizeCache]);
+			int readVal4 = TM_LOAD(&memcd->extraVal[newIdx+3*sizeCache]);
+			int readVal5 = TM_LOAD(&memcd->extraVal[newIdx+4*sizeCache]);
+			int readVal6 = TM_LOAD(&memcd->extraVal[newIdx+5*sizeCache]);
+			int readVal7 = TM_LOAD(&memcd->extraVal[newIdx+6*sizeCache]);
+			int* volatile ptr_ts = &memcd->ts_CPU[newIdx];
+			int ts = TM_LOAD(ptr_ts);
+			TM_STORE(ptr_ts, ts+1);
+			// *ptr_ts = input_clock; // Done non-transactionally
 			response.isFound = 1;
-			response.value   = readVal/*|readVal1|readVal2|readVal3|readVal4|readVal5|readVal6|readVal7*/;
+			response.value   = readVal|readVal1|readVal2|readVal3|readVal4|readVal5|readVal6|readVal7;
 			break;
 		}
 	}
@@ -307,7 +363,7 @@ void cpu_SET_kernel(memcd_t *memcd, int *input_key, int *input_value, unsigned i
 	int sizeCache = memcd->nbSets*memcd->nbWays;
 
 	// 1) hash key
-	modHash = key;
+	modHash = key % memcd->nbSets;
 	// TODO: this would be nice, but we lose control of where the key goes to
 	// memset(key, 0, size_of_hash);
 	// memcpy(key, input_key, sizeof(int));
@@ -315,29 +371,40 @@ void cpu_SET_kernel(memcd_t *memcd, int *input_key, int *input_value, unsigned i
 	// modHash = hash[0];
 	// modHash += hash[1];
 
+#if BANK_PART == 1 /* use MOD 3 */
+	setIdx = modHash / 3 + (modHash % 3) * (memcd->nbSets / 3);
+#else /* use MOD 2 */
+	setIdx = modHash / 2 + (modHash % 2) * (memcd->nbSets / 2);
+#endif
+
 	// 2) setIdx <- hash % nbSets
-	setIdx = modHash % memcd->nbSets;
-	modHash = setIdx;
+	int mod_set = setIdx;
 	setIdx = setIdx * memcd->nbWays;
 
-	__builtin_prefetch(&memcd->setUsage[modHash], 1, 0);
+	__builtin_prefetch(&memcd->setUsage[mod_set], 1, 0);
 	for (int i = 0; i < memcd->nbWays; ++i) {
 		size_t newIdx = setIdx + i;
 		__builtin_prefetch(&memcd->state[newIdx], 1, 1);
 		__builtin_prefetch(&memcd->key[newIdx], 1, 1);
-		__builtin_prefetch(&memcd->extraKey[newIdx], 1, 1);
-		__builtin_prefetch(&memcd->extraKey[newIdx+sizeCache], 1, 1);
-		__builtin_prefetch(&memcd->extraKey[newIdx+2*sizeCache], 1, 1);
-		__builtin_prefetch(&memcd->ts[newIdx], 1, 1);
+		// __builtin_prefetch(&memcd->extraKey[newIdx], 1, 1);
+		// __builtin_prefetch(&memcd->extraKey[newIdx+sizeCache], 1, 1);
+		// __builtin_prefetch(&memcd->extraKey[newIdx+2*sizeCache], 1, 1);
+		__builtin_prefetch(&memcd->ts_CPU[newIdx], 1, 1);
+		__builtin_prefetch(&memcd->ts_GPU[newIdx], 1, 1);
 		__builtin_prefetch(&memcd->val[newIdx], 1, 1);
-		__builtin_prefetch(&memcd->extraVal[newIdx], 1, 1);
-		__builtin_prefetch(&memcd->extraVal[newIdx+sizeCache], 1, 1);
-		__builtin_prefetch(&memcd->extraVal[newIdx+2*sizeCache], 1, 1);
-		__builtin_prefetch(&memcd->extraVal[newIdx+3*sizeCache], 1, 1);
-		__builtin_prefetch(&memcd->extraVal[newIdx+4*sizeCache], 1, 1);
-		__builtin_prefetch(&memcd->extraVal[newIdx+5*sizeCache], 1, 1);
-		__builtin_prefetch(&memcd->extraVal[newIdx+6*sizeCache], 1, 1);
+		// __builtin_prefetch(&memcd->extraVal[newIdx], 1, 1);
+		// __builtin_prefetch(&memcd->extraVal[newIdx+sizeCache], 1, 1);
+		// __builtin_prefetch(&memcd->extraVal[newIdx+2*sizeCache], 1, 1);
+		// __builtin_prefetch(&memcd->extraVal[newIdx+3*sizeCache], 1, 1);
+		// __builtin_prefetch(&memcd->extraVal[newIdx+4*sizeCache], 1, 1);
+		// __builtin_prefetch(&memcd->extraVal[newIdx+5*sizeCache], 1, 1);
+		// __builtin_prefetch(&memcd->extraVal[newIdx+6*sizeCache], 1, 1);
 	}
+
+	int usageValue = memcd->setUsage[mod_set];
+
+	// before starting the transaction take a clock value
+	unsigned memcd_clock_val = __sync_fetch_and_add(&memcached_global_clock, 1);
 
   /* Allow overdrafts */
   TM_START(z, RW);
@@ -367,7 +434,9 @@ void cpu_SET_kernel(memcd_t *memcd, int *input_key, int *input_value, unsigned i
 			idxFound = i;
 			break;
 		}
-		unsigned readTS = TM_LOAD(&memcd->ts[newIdx]);
+		unsigned readTS_CPU = TM_LOAD(&memcd->ts_CPU[newIdx]);
+		unsigned readTS_GPU = memcd->ts_GPU[newIdx]; // hack here
+		unsigned readTS = std::max(readTS_CPU, readTS_GPU);
 		if (readTS < TS) { // look for the older entry
 			TS = readTS;
 			idxEvict = i;
@@ -379,7 +448,7 @@ void cpu_SET_kernel(memcd_t *memcd, int *input_key, int *input_value, unsigned i
 	} else {
 		newIdx = setIdx + idxFound;
 	}
-	int* volatile ptr_ts = &memcd->ts[newIdx]; // TODO: optimizer screws the ptrs
+	int* volatile ptr_ts = &memcd->ts_CPU[newIdx]; // TODO: optimizer screws the ptrs
 	int* volatile ptr_val = &memcd->val[newIdx];
 	int* volatile ptr_val1 = &memcd->extraVal[newIdx];
 	int* volatile ptr_val2 = &memcd->extraVal[newIdx+sizeCache];
@@ -389,16 +458,16 @@ void cpu_SET_kernel(memcd_t *memcd, int *input_key, int *input_value, unsigned i
 	int* volatile ptr_val6 = &memcd->extraVal[newIdx+5*sizeCache];
 	int* volatile ptr_val7 = &memcd->extraVal[newIdx+6*sizeCache];
 
-	int* volatile ptr_setUsage = &memcd->setUsage[modHash];
-	int usageValue = memcd->setUsage[modHash];
-	if (usageValue != input_clock) {
+	int* volatile ptr_setUsage = &memcd->setUsage[mod_set];
+	// if (usageValue != input_clock) {
 		TM_STORE(ptr_setUsage, input_clock);
-	}
+	// }
 
-	// *ptr_ts = input_clock;
-	TM_STORE(ptr_ts, input_clock);
-	// *ptr_val = val;
-	TM_STORE(ptr_val, val);
+	// Done non-transactionally after commit
+	// TM_STORE(ptr_ts, input_clock); // *ptr_ts = input_clock;
+	*ptr_ts = input_clock;
+
+	TM_STORE(ptr_val, val); // *ptr_val = val;
 	TM_STORE(ptr_val1, val);
 	TM_STORE(ptr_val2, val);
 	TM_STORE(ptr_val3, val);
@@ -406,6 +475,7 @@ void cpu_SET_kernel(memcd_t *memcd, int *input_key, int *input_value, unsigned i
 	TM_STORE(ptr_val5, val);
 	TM_STORE(ptr_val6, val);
 	TM_STORE(ptr_val7, val);
+
 	if (!isInCache) {
 		volatile int newState = MEMCD_VALID|MEMCD_WRITTEN;
 		int* volatile ptr_key = &memcd->key[newIdx];
@@ -413,13 +483,13 @@ void cpu_SET_kernel(memcd_t *memcd, int *input_key, int *input_value, unsigned i
 		int* volatile ptr_key2 = &memcd->extraKey[newIdx+sizeCache];
 		int* volatile ptr_key3 = &memcd->extraKey[newIdx+2*sizeCache];
 		int* volatile ptr_state = &memcd->state[newIdx];
-		// *ptr_key = key;
-		TM_STORE(ptr_key, key);
+
+		TM_STORE(ptr_key, key); // *ptr_key = key;
 		TM_STORE(ptr_key1, key);
 		TM_STORE(ptr_key2, key);
 		TM_STORE(ptr_key3, key);
-		// *ptr_state = newState;
-		TM_STORE(ptr_state, newState);
+
+		TM_STORE(ptr_state, newState); // *ptr_state = newState;
 	}
 	TM_COMMIT;
 
@@ -436,16 +506,24 @@ void cpu_SET_kernel_NOTX(memcd_t *memcd, int *input_key, int *input_value, unsig
 	int sizeCache = memcd->nbSets*memcd->nbWays;
 
 	// 1) hash key
-	modHash = key;
+	modHash = key % memcd->nbSets;
+
+#if BANK_PART == 1 /* use MOD 3 */
+	setIdx = modHash / 3 + (modHash % 3) * (memcd->nbSets / 3);
+#else /* use MOD 2 */
+	setIdx = modHash / 2 + (modHash % 2) * (memcd->nbSets / 2);
+#endif
+	// setIdx = modHash;
 
 	// 2) setIdx <- hash % nbSets
-	setIdx = modHash % memcd->nbSets;
+	int mod_set = setIdx;
 	setIdx = setIdx * memcd->nbWays;
 
 	// 3) find in set the key, if not found write not found in the output
 	int idxFound = -1;
 	int idxEvict = -1;
 	int isInCache = 0;
+	int cacheHasSpace = 0;
 	unsigned TS   = (unsigned)-1; // largest TS
 	for (int i = 0; i < memcd->nbWays; ++i)
 	{
@@ -453,6 +531,7 @@ void cpu_SET_kernel_NOTX(memcd_t *memcd, int *input_key, int *input_value, unsig
 		int readState = memcd->state[newIdx];
 		if (((readState & MEMCD_VALID) == 0) && idxFound == -1) {
 			// found empty spot
+			cacheHasSpace = 1;
 			idxFound = i;
 			continue;
 		}
@@ -463,7 +542,7 @@ void cpu_SET_kernel_NOTX(memcd_t *memcd, int *input_key, int *input_value, unsig
 			idxFound = i;
 			break;
 		}
-		unsigned readTS = memcd->ts[newIdx];
+		unsigned readTS = memcd->ts_CPU[newIdx];
 		if (readTS < TS) { // look for the older entry
 			TS = readTS;
 			idxEvict = i;
@@ -475,7 +554,7 @@ void cpu_SET_kernel_NOTX(memcd_t *memcd, int *input_key, int *input_value, unsig
 	} else {
 		newIdx = setIdx + idxFound;
 	}
-	memcd->ts[newIdx] = input_clock;
+	memcd->ts_CPU[newIdx] = input_clock;
 	memcd->val[newIdx] = val;
 	memcd->extraVal[newIdx] = val;
 	memcd->extraVal[newIdx+sizeCache] = val;
@@ -484,12 +563,24 @@ void cpu_SET_kernel_NOTX(memcd_t *memcd, int *input_key, int *input_value, unsig
 	memcd->extraVal[newIdx+4*sizeCache] = val;
 	memcd->extraVal[newIdx+5*sizeCache] = val;
 	memcd->extraVal[newIdx+7*sizeCache] = val;
+	// if (!cacheHasSpace && !isInCache) {
+	// 	printf("evicted %i -> %i\n", memcd->key[newIdx], key);
+	// }
 	if (!isInCache) {
 		int newState = MEMCD_VALID|MEMCD_WRITTEN;
 		memcd->key[newIdx] = key;
 		memcd->extraKey[newIdx] = key;
 		memcd->extraKey[newIdx+sizeCache] = key;
 		memcd->extraKey[newIdx+2*sizeCache] = key;
+		memcd->val[newIdx] = key;
+		memcd->extraVal[newIdx] = key;
+		memcd->extraVal[newIdx+sizeCache] = key;
+		memcd->extraVal[newIdx+2*sizeCache] = key;
+		memcd->extraVal[newIdx+3*sizeCache] = key;
+		memcd->extraVal[newIdx+4*sizeCache] = key;
+		memcd->extraVal[newIdx+5*sizeCache] = key;
+		memcd->extraVal[newIdx+6*sizeCache] = key;
+		memcd->extraVal[newIdx+7*sizeCache] = key;
 		memcd->state[newIdx] = newState;
 	}
 }
@@ -509,6 +600,7 @@ static void test(int id, void *data)
   memcd_t   *memcd = d->memcd;
 	// TODO: this goes into the input
 	float setKernelPerc = parsedData.set_percent * 1000;
+	static thread_local volatile unsigned seed = 0x213FAB + id;
 
 	int good_buffers_start = 0;
 	int bad_buffers_start = size_of_CPU_input_buffer/sizeof(int);
@@ -522,31 +614,29 @@ static void test(int id, void *data)
 	int rndOpt = RAND_R_FNC(d->seed);
 	static thread_local int curr_tx = 0;
 
-	if (myK_TXs == 0 && startInputPtr[CPU_QUEUE] + CPU_K_TXS <= endInputPtr[CPU_QUEUE]) {
+	if (myK_TXs == 0 && !isCPUBatchSteal/*&& startInputPtr[CPU_QUEUE] + CPU_K_TXS <= endInputPtr[CPU_QUEUE]*/) {
 		// fetch transactions from the CPU_QUEUE
+		volatile long oldStartInputPtr;
+		volatile long newStartInputPtr;
 		do {
-			volatile long oldStartInputPtr = startInputPtr[CPU_QUEUE];
-			volatile long newStartInputPtr = oldStartInputPtr + CPU_K_TXS;
-			if (__sync_bool_compare_and_swap(&startInputPtr[CPU_QUEUE], oldStartInputPtr, newStartInputPtr)) {
-				myK_TXs = CPU_K_TXS;
-				buffers_start = good_buffers_start; // CPU input buffer
-				break;
-			}
-		} while (startInputPtr[CPU_QUEUE] + CPU_K_TXS <= endInputPtr[CPU_QUEUE]);
+			oldStartInputPtr = startInputPtr[CPU_QUEUE];
+			newStartInputPtr = oldStartInputPtr + CPU_K_TXS;
+		} while (!__sync_bool_compare_and_swap(&startInputPtr[CPU_QUEUE], oldStartInputPtr, newStartInputPtr));
+		myK_TXs = CPU_K_TXS;
+		buffers_start = good_buffers_start; // CPU input buffer
 	}
 
-	if (myK_TXs == 0 && startInputPtr[SHARED_QUEUE] + CPU_K_TXS <= endInputPtr[SHARED_QUEUE]) {
+	if (myK_TXs == 0 && isCPUBatchSteal/*&& startInputPtr[SHARED_QUEUE] + CPU_K_TXS <= endInputPtr[SHARED_QUEUE]*/) {
 		// could not fetch from the CPU, let us see the SHARED_QUEUE
 		// NOTE: case BANK_PART == 2 the shared queue is actually the GPU
+		volatile long oldStartInputPtr;
+		volatile long newStartInputPtr;
 		do {
-			volatile long oldStartInputPtr = startInputPtr[SHARED_QUEUE];
-			volatile long newStartInputPtr = oldStartInputPtr + CPU_K_TXS;
-			if (__sync_bool_compare_and_swap(&startInputPtr[SHARED_QUEUE], oldStartInputPtr, newStartInputPtr)) {
-				myK_TXs = CPU_K_TXS;
-				buffers_start = bad_buffers_start; // SHARED input buffer
-				break;
-			}
-		} while (startInputPtr[SHARED_QUEUE] + CPU_K_TXS <= endInputPtr[SHARED_QUEUE]);
+			oldStartInputPtr = startInputPtr[SHARED_QUEUE];
+			newStartInputPtr = oldStartInputPtr + CPU_K_TXS;
+		} while (!__sync_bool_compare_and_swap(&startInputPtr[SHARED_QUEUE], oldStartInputPtr, newStartInputPtr));
+		myK_TXs = CPU_K_TXS;
+		buffers_start = bad_buffers_start; // SHARED input buffer
 	}
 
 	if (myK_TXs == 0) {
@@ -566,8 +656,14 @@ static void test(int id, void *data)
 	input_key = CPUInputBuffer[buffers_start+id*NB_CPU_TXS_PER_THREAD + curr_tx];
 	input_val = input_key;
 
+	int isSet = rndOpt % 100000 < setKernelPerc;
+
+#ifdef CPU_STEAL_ONLY_GETS
+	isSet = isCPUBatchSteal ? 0 : isSet;
+#endif /* CPU_STEAL_ONLY_GETS */
+
 	/* 100% * 1000*/
-	if (rndOpt % 100000 < setKernelPerc) {
+	if (isSet) {
 		// Set kernel
 		cpu_SET_kernel(d->memcd, &input_key, &input_val, *d->memcd->globalTs);
 	} else {
@@ -577,6 +673,10 @@ static void test(int id, void *data)
 	}
 	curr_tx += 1;
 	curr_tx = curr_tx % NB_CPU_TXS_PER_THREAD;
+
+	volatile int spin = 0;
+	int randomBackoff = RAND_R_FNC(seed) % parsedData.CPU_backoff;
+	while (spin++ < randomBackoff);
 
   d->nb_transfer++;
   d->global_commits++;
@@ -614,6 +714,10 @@ static void before_batch(int id, void *data)
 	// 	memman_select("GPU_input_buffer_good");
 	// }
 	// memman_cpy_to_gpu(NULL, NULL);
+
+	thread_local static unsigned long seed = 0x0012112A3112514A;
+	isCPUBatchSteal = (RAND_R_FNC(seed) % 10000) < (parsedData.CPU_steal_prob * 10000);
+	isGPUBatchSteal = (RAND_R_FNC(seed) % 10000) < (parsedData.GPU_steal_prob * 10000);
 }
 
 static void after_batch(int id, void *data)
@@ -641,17 +745,22 @@ static void choose_policy(int, void*) {
   // TODO: this picks the one with higher number of TXs
 	// TODO: GPU only gets the stats in the end --> need to remove the dropped TXs
 	HeTM_stats_data.nbTxsGPU += TXsOnGPU;
-  if (TXsOnCPU > TXsOnGPU) {
-    HeTM_shared_data.policy = HETM_GPU_INV;
+  if (HeTM_shared_data.policy == HETM_GPU_INV) {
 		if (HeTM_is_interconflict()) {
 			HeTM_stats_data.nbDroppedTxsGPU += TXsOnGPU;
 		} else {
 			HeTM_stats_data.nbCommittedTxsGPU += TXsOnGPU;
 		}
-  } else {
-    HeTM_shared_data.policy = HETM_CPU_INV;
+	} else if (HeTM_shared_data.policy == HETM_CPU_INV) {
 		HeTM_stats_data.nbCommittedTxsGPU += TXsOnGPU;
-  }
+	}
+
+	// can only choose the policy for the next round
+  // if (TXsOnCPU > TXsOnGPU) {
+  //   HeTM_shared_data.policy = HETM_GPU_INV;
+  // } else {
+  //   HeTM_shared_data.policy = HETM_CPU_INV;
+  // }
 	wasWaitingTXs = 0;
 	__sync_synchronize();
   // -----------------------------------------------------------------------
@@ -670,51 +779,70 @@ static void test_cuda(int id, void *data)
 	*(d->memcd->globalTs) += 1;
 
 	// -------------------
-	if (startInputPtr[GPU_QUEUE] + NB_GPU_TXS <= endInputPtr[GPU_QUEUE]) {
+	if (!isGPUBatchSteal/*startInputPtr[GPU_QUEUE] + NB_GPU_TXS <= endInputPtr[GPU_QUEUE]*/) {
 		// fetch transactions from the CPU_QUEUE
+		volatile long oldStartInputPtr;
+		volatile long newStartInputPtr;
 		do {
-			volatile long oldStartInputPtr = startInputPtr[GPU_QUEUE];
-			volatile long newStartInputPtr = oldStartInputPtr + NB_GPU_TXS;
-			if (__sync_bool_compare_and_swap(&startInputPtr[GPU_QUEUE], oldStartInputPtr, newStartInputPtr)) {
-				gotTXs = 1;
-				memman_select("GPU_input_buffer_good"); // GPU input buffer
-				memman_cpy_to_gpu(NULL, NULL);
-				break;
-			}
-		} while (startInputPtr[GPU_QUEUE] + NB_GPU_TXS <= endInputPtr[GPU_QUEUE]);
+			oldStartInputPtr = startInputPtr[GPU_QUEUE];
+			newStartInputPtr = oldStartInputPtr + NB_GPU_TXS;
+		} while (!__sync_bool_compare_and_swap(&startInputPtr[GPU_QUEUE], oldStartInputPtr, newStartInputPtr));
+		gotTXs = 1;
+		counter++;
+		if (counter & 1) {
+			memman_select("GPU_input_buffer_good1"); // GPU input buffer
+		} else {
+			memman_select("GPU_input_buffer_good2"); // GPU input buffer
+		}
+		memman_cpy_to_gpu(NULL, NULL);
 	}
 
-	if (!gotTXs && startInputPtr[SHARED_QUEUE] + NB_GPU_TXS <= endInputPtr[SHARED_QUEUE]) {
+	if (isGPUBatchSteal /*&& startInputPtr[SHARED_QUEUE] + NB_GPU_TXS <= endInputPtr[SHARED_QUEUE]*/) {
 		// could not fetch from the CPU, let us see the SHARED_QUEUE
 		// NOTE: case BANK_PART == 2 the shared queue is actually the GPU
+		volatile long oldStartInputPtr = startInputPtr[SHARED_QUEUE];
+		volatile long newStartInputPtr = oldStartInputPtr + NB_GPU_TXS;
 		do {
-			volatile long oldStartInputPtr = startInputPtr[SHARED_QUEUE];
-			volatile long newStartInputPtr = oldStartInputPtr + NB_GPU_TXS;
-			if (__sync_bool_compare_and_swap(&startInputPtr[SHARED_QUEUE], oldStartInputPtr, newStartInputPtr)) {
-				gotTXs = 1;
-				memman_select("GPU_input_buffer_bad"); // shared input buffer (sorry for the naming)
-				memman_cpy_to_gpu(NULL, NULL);
-				break;
-			}
-		} while (startInputPtr[SHARED_QUEUE] + CPU_K_TXS <= endInputPtr[SHARED_QUEUE]);
+			oldStartInputPtr = startInputPtr[SHARED_QUEUE];
+			newStartInputPtr = oldStartInputPtr + NB_GPU_TXS;
+		} while (!__sync_bool_compare_and_swap(&startInputPtr[SHARED_QUEUE], oldStartInputPtr, newStartInputPtr));
+		gotTXs = 1;
+		counter++;
+		if (counter & 1) {
+			memman_select("GPU_input_buffer_bad1"); // shared input buffer (sorry for the naming)
+		} else {
+			memman_select("GPU_input_buffer_bad2"); // shared input buffer (sorry for the naming
+		}
+		memman_cpy_to_gpu(NULL, NULL);
 	}
 
-	if (!gotTXs) {
-		// failed to get new TXs
-		// need to discount this transaction
-		wasWaitingTXs = 1;
-	}
+	// if (!gotTXs) {
+	// 	// failed to get new TXs
+	// 	// need to discount this transaction
+	// 	wasWaitingTXs = 1;
+	// }
 	// -------------------
 
 	__sync_synchronize();
 
-	if (wasWaitingTXs) {
+	if (wasWaitingTXs) { // Not used anymore
 		// need to wait for more input
+
+		// TODO: this HETM_GPU_IDLE is not working !!!
+
+		// if the GPU is idle for too long, a large chunk of data may need to
+		// be sync'ed, actually VERS could handle this issue by sending its
+		// logs asynchronously
+		// HeTM_set_GPU_status(HETM_GPU_IDLE);
+
 		do {
 			COMPILER_FENCE(); // reads HeTM_is_stop() (needed for optimization flags)
 		} while ((startInputPtr[GPU_QUEUE] + NB_GPU_TXS > endInputPtr[GPU_QUEUE]
 			&& startInputPtr[SHARED_QUEUE] + NB_GPU_TXS > endInputPtr[SHARED_QUEUE])
 			&& !HeTM_is_stop()); // wait
+
+		// HeTM_set_GPU_status(HETM_BATCH_RUN);
+		// __sync_synchronize();
 		jobWithCuda_runEmptyKernel(d, cd, base_ptr, *(d->memcd->globalTs));
 	} else {
 
@@ -796,10 +924,13 @@ int main(int argc, char **argv)
 	// TODO: this parsedData.nb_threads is what comes of the -n input
 	size_of_CPU_input_buffer = parsedData.nb_threads*sizeof(int) * NB_CPU_TXS_PER_THREAD;
 
-	memman_alloc_gpu("GPU_input_buffer", size_of_GPU_input_buffer, NULL, 0);
+	// copy the input before launching the kernel
+	memman_alloc_gpu("GPU_input_buffer", maxGPUoutputBufferSize*sizeof(int), NULL, 0);
 	GPUInputBuffer = (int*)memman_get_gpu(NULL);
-	memman_alloc_cpu("GPU_input_buffer_good", size_of_GPU_input_buffer, GPUInputBuffer, 0);
-	memman_alloc_cpu("GPU_input_buffer_bad", size_of_GPU_input_buffer, GPUInputBuffer, 0);
+	memman_alloc_cpu("GPU_input_buffer_good1", maxGPUoutputBufferSize*sizeof(int), GPUInputBuffer, 0);
+	memman_alloc_cpu("GPU_input_buffer_good2", maxGPUoutputBufferSize*sizeof(int), GPUInputBuffer, 0);
+	memman_alloc_cpu("GPU_input_buffer_bad1", maxGPUoutputBufferSize*sizeof(int), GPUInputBuffer, 0);
+	memman_alloc_cpu("GPU_input_buffer_bad2", maxGPUoutputBufferSize*sizeof(int), GPUInputBuffer, 0);
 
 	// CPU Buffers
 	malloc_or_die(CPUInputBuffer, size_of_CPU_input_buffer * 2); // good and bad
@@ -813,11 +944,11 @@ int main(int argc, char **argv)
   HeTM_set_explicit_log_block_size(parsedData.trans * BANK_NB_TRANSFERS); // TODO:
 
   HeTM_init((HeTM_init_s){
-#if CPU_INV == 1
-    .policy       = HETM_CPU_INV,
-#else /* GPU_INV */
+// #if CPU_INV == 1
+    // .policy       = HETM_CPU_INV,
+// #else /* GPU_INV */
     .policy       = HETM_GPU_INV,
-#endif /**/
+// #endif /**/
     .nbCPUThreads = parsedData.nb_threads,
     .nbGPUBlocks  = parsedData.GPUblockNum,
     .nbGPUThreads = parsedData.GPUthreadNum,
@@ -841,7 +972,7 @@ int main(int argc, char **argv)
 	memcd->globalTs = (unsigned*)memman_get_cpu(NULL);
 	accountsSize = memcd->nbSets*memcd->nbWays*sizeof(account_t);
 	// last one is to check if the set was changed or not
-	sizePool = accountsSize * 4 + memcd->nbSets*sizeof(account_t);
+	sizePool = accountsSize * 5 + memcd->nbSets*sizeof(account_t);
 
 	// Setting the key size to be 16
 	sizePool += accountsSize * 3; // already have 4B missing 3*4B
@@ -849,7 +980,7 @@ int main(int argc, char **argv)
 	// Setting the value size to be 32
 	sizePool += accountsSize * 7; // already have 4B missing 7*4B
 
-  HeTM_mempool_init(sizePool); // <K,V,TS,STATE>
+  HeTM_mempool_init(sizePool); // <K,V,TS_CPU,TS_GPU,STATE>
 
   // TODO:
   parsedData.nb_threadsCPU = HeTM_shared_data.nbCPUThreads;
@@ -883,8 +1014,9 @@ int main(int argc, char **argv)
 	memcd->extraKey = memcd->key + (memcd->nbSets*memcd->nbWays);
 	memcd->val      = memcd->extraKey + 3*(memcd->nbSets*memcd->nbWays);
 	memcd->extraVal = memcd->val + (memcd->nbSets*memcd->nbWays);
-	memcd->ts       = memcd->extraVal + 7*(memcd->nbSets*memcd->nbWays);
-	memcd->state    = memcd->ts  + (memcd->nbSets*memcd->nbWays);
+	memcd->ts_CPU   = memcd->extraVal + 7*(memcd->nbSets*memcd->nbWays);
+	memcd->ts_GPU   = memcd->ts_CPU + (memcd->nbSets*memcd->nbWays);
+	memcd->state    = memcd->ts_GPU + (memcd->nbSets*memcd->nbWays);
 	memcd->setUsage = memcd->state + (memcd->nbSets*memcd->nbWays);
 
   memset(memcd->key, 0, sizePool);
@@ -914,12 +1046,27 @@ int main(int argc, char **argv)
   printf("Initializing STM\n");
 
 	/* POPULATE the cache */
-	for (int i = 0; i < size_of_CPU_input_buffer/sizeof(int); ++i) {
+	for (int i = 0; i < (size_of_CPU_input_buffer * 2)/sizeof(int); ++i) {
 		cpu_SET_kernel_NOTX(memcd, &CPUInputBuffer[i], &CPUInputBuffer[i], 0);
 	}
-	memman_select("GPU_input_buffer_good");
+	memman_select("GPU_input_buffer_good1");
 	int *gpu_buffer_cpu_ptr = (int*)memman_get_cpu(NULL);
-	for (int i = 0; i < size_of_GPU_input_buffer/sizeof(int); ++i) {
+	for (int i = 0; i < size_of_GPU_input_buffer/4/sizeof(int); ++i) {
+		cpu_SET_kernel_NOTX(memcd, &gpu_buffer_cpu_ptr[i], &gpu_buffer_cpu_ptr[i], 0);
+	}
+	memman_select("GPU_input_buffer_good2");
+	gpu_buffer_cpu_ptr = (int*)memman_get_cpu(NULL);
+	for (int i = 0; i < size_of_GPU_input_buffer/4/sizeof(int); ++i) {
+		cpu_SET_kernel_NOTX(memcd, &gpu_buffer_cpu_ptr[i], &gpu_buffer_cpu_ptr[i], 0);
+	}
+	memman_select("GPU_input_buffer_bad1");
+	gpu_buffer_cpu_ptr = (int*)memman_get_cpu(NULL);
+	for (int i = 0; i < size_of_GPU_input_buffer/4/sizeof(int); ++i) {
+		cpu_SET_kernel_NOTX(memcd, &gpu_buffer_cpu_ptr[i], &gpu_buffer_cpu_ptr[i], 0);
+	}
+	memman_select("GPU_input_buffer_bad2");
+	gpu_buffer_cpu_ptr = (int*)memman_get_cpu(NULL);
+	for (int i = 0; i < size_of_GPU_input_buffer/4/sizeof(int); ++i) {
 		cpu_SET_kernel_NOTX(memcd, &gpu_buffer_cpu_ptr[i], &gpu_buffer_cpu_ptr[i], 0);
 	}
 
@@ -972,7 +1119,7 @@ int main(int argc, char **argv)
 
     printf("STARTING...(Run %d)\n", j);
 
-		std::thread inputThread(produce_input);
+		// std::thread inputThread(produce_input); // NO LONGER USED
 
     TIMER_READ(parsedData.start);
 
@@ -991,7 +1138,7 @@ int main(int argc, char **argv)
     /* Wait for thread completion */
     HeTM_join_CPU_threads();
 
-		inputThread.join();
+		// inputThread.join();
 
     // reset accounts
     // memset(bank->accounts, 0, bank->size * sizeof(account_t));

@@ -30,7 +30,8 @@ __global__ void HeTM_setupCurand(void *args)
 	RAND_R_FNC(state[id]);
 }
 
-__device__ int dev_memman_access_addr_gran(void *bmap, void *base, void *addr, size_t gran, size_t bits)
+__device__ int dev_memman_access_addr_gran(void *bmap, void *base, void *addr,
+	size_t gran, size_t bits, unsigned char valToSet)
 {
   char *bytes = (char*) bmap;
   uintptr_t addr_ptr = (uintptr_t)addr; // TODO: address translation
@@ -39,15 +40,15 @@ __device__ int dev_memman_access_addr_gran(void *bmap, void *base, void *addr, s
   int chunk_pos      = delta >> bits;
   // printf("chunk_pos=%i bytes[chunk_pos]=%i\n", chunk_pos, bytes[chunk_pos]);
   if (bytes[chunk_pos] == 0) {
-    ByteM_SET_POS(chunk_pos, bytes);
+    ByteM_SET_POS(chunk_pos, bytes, valToSet);
   }
   return 0;
 }
 
-__device__ int dev_memman_access_addr(void *bmap, void *addr)
+__device__ int dev_memman_access_addr(void *bmap, void *addr, unsigned char valToSet)
 {
   memman_bmap_s *key_bmap = (memman_bmap_s*)bmap;
   char *bytes = key_bmap->ptr;
-  dev_memman_access_addr_gran(bytes, key_bmap->base, addr, key_bmap->gran, key_bmap->bits);
+  dev_memman_access_addr_gran(bytes, key_bmap->base, addr, key_bmap->gran, key_bmap->bits, valToSet);
   return 0;
 }

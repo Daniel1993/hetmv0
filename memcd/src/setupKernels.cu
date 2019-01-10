@@ -173,8 +173,9 @@ static void run_memcdReadTx(knlman_callback_params_s params)
   input->extraKey = input->key + (d->memcd_nbSets*d->memcd_nbWays);
   input->val      = input->extraKey + 3*(d->memcd_nbSets*d->memcd_nbWays);
   input->extraVal = input->val + (d->memcd_nbSets*d->memcd_nbWays);
-  input->ts       = input->extraVal + 7*(d->memcd_nbSets*d->memcd_nbWays);
-  input->state    = input->ts  + (d->memcd_nbSets*d->memcd_nbWays);
+  input->ts_CPU   = input->extraVal + 7*(d->memcd_nbSets*d->memcd_nbWays);
+  input->ts_GPU   = input->ts_CPU + (d->memcd_nbSets*d->memcd_nbWays);
+  input->state    = input->ts_GPU + (d->memcd_nbSets*d->memcd_nbWays);
   input->setUsage = input->state + (d->memcd_nbSets*d->memcd_nbWays);
   input->nbSets   = d->num_sets;
   input->nbWays   = d->num_ways;
@@ -229,8 +230,9 @@ static void run_memcdWriteTx(knlman_callback_params_s params)
   input->extraKey = input->key + (d->memcd_nbSets*d->memcd_nbWays);
   input->val      = input->extraKey + 3*(d->memcd_nbSets*d->memcd_nbWays);
   input->extraVal = input->val + (d->memcd_nbSets*d->memcd_nbWays);
-  input->ts       = input->extraVal + 7*(d->memcd_nbSets*d->memcd_nbWays);
-  input->state    = input->ts  + (d->memcd_nbSets*d->memcd_nbWays);
+  input->ts_CPU   = input->extraVal + 7*(d->memcd_nbSets*d->memcd_nbWays);
+  input->ts_GPU   = input->ts_CPU + (d->memcd_nbSets*d->memcd_nbWays);
+  input->state    = input->ts_GPU + (d->memcd_nbSets*d->memcd_nbWays);
   input->setUsage = input->state + (d->memcd_nbSets*d->memcd_nbWays);
   input->nbSets   = d->num_sets;
   input->nbWays   = d->num_ways;

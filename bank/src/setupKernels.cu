@@ -223,8 +223,9 @@ static void run_memcdWriteTx(knlman_callback_params_s params)
 
   input->key   = d->dev_a;
   input->val   = input->key + (d->memcd_array_size/4)/sizeof(PR_GRANULE_T);
-  input->ts    = input->val + (d->memcd_array_size/4)/sizeof(PR_GRANULE_T);
-  input->state = input->ts  + (d->memcd_array_size/4)/sizeof(PR_GRANULE_T);
+  input->ts_CPU = input->val + (d->memcd_array_size/4)/sizeof(PR_GRANULE_T);
+  input->ts_GPU = input->ts_CPU + (d->memcd_array_size/4)/sizeof(PR_GRANULE_T);
+  input->state = input->ts_GPU  + (d->memcd_array_size/4)/sizeof(PR_GRANULE_T);
   input->nbSets = d->num_sets;
   input->nbWays = d->num_ways;
   input->input_keys = GPUInputBuffer;

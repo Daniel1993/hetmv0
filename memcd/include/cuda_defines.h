@@ -71,6 +71,13 @@ typedef struct queue {
 typedef struct memcd_get_output_ {
 	int isFound;
 	int value;
+	int val2;
+	int val3;
+	int val4;
+	int val5;
+	int val6;
+	int val7;
+	int val8;
 } memcd_get_output_t;
 // ----------------------------
 

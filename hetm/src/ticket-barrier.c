@@ -1,5 +1,6 @@
 #include "ticket-barrier.h"
 
+#define _GNU_SOURCE
 #include <pthread.h>
 #include <linux/futex.h>
 #include <stdint.h>
@@ -56,7 +57,7 @@ void ticket_barrier_destroy(ticket_barrier_t *b)
 
 		if (count_out == atomic_read(b->count_in) + 1) return;
 
-		sys_futex(&b->count_out, FUTEX_WAIT_PRIVATE, count_out, NULL, NULL, 0);
+		// sys_futex(&b->count_out, FUTEX_WAIT_PRIVATE, count_out, NULL, NULL, 0);
 	}
 }
 
@@ -79,7 +80,8 @@ int ticket_barrier_cross(ticket_barrier_t *b)
 			b->count_next += b->total;
 
 			/* Wake up waiters */
-			sys_futex(&b->count_next, FUTEX_WAKE_PRIVATE, INT_MAX, NULL, NULL, 0);
+			// sys_futex(&b->count_next, FUTEX_WAKE_PRIVATE, INT_MAX, NULL, NULL, 0);
+			__sync_synchronize();
 
 			ret = PTHREAD_BARRIER_SERIAL_THREAD;
 
@@ -94,7 +96,10 @@ int ticket_barrier_cross(ticket_barrier_t *b)
 		}
 
 		/* Go to sleep until our bunch comes up */
-		sys_futex(&b->count_next, FUTEX_WAIT_PRIVATE, next, NULL, NULL, 0);
+		// sys_futex(&b->count_next, FUTEX_WAIT_PRIVATE, next, NULL, NULL, 0);
+		while(b->count_next % b->total == 0) {
+			pthread_yield(); //asm("" ::: "memory");
+		}
 	}
 
 	/* Add to count_out, simultaneously reading count_in */
@@ -104,7 +109,8 @@ int ticket_barrier_cross(ticket_barrier_t *b)
 	if ((temp >> 32) == (unsigned) temp)
 	{
 		/* Notify destroyer */
-		sys_futex(&b->count_out, FUTEX_WAKE_PRIVATE, 1, NULL, NULL, 0);
+		// sys_futex(&b->count_out, FUTEX_WAKE_PRIVATE, 1, NULL, NULL, 0);
+		__sync_synchronize();
 	}
 
 	return ret;

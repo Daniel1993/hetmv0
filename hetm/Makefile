@@ -3,6 +3,7 @@ CUDA_PATH     ?= /usr/local/cuda
 TINY_ROOT     ?= $(CURR_DIR)/../tinyMOD
 TSX_ROOT      ?= $(CURR_DIR)/../tsxMOD
 HTM_SGL       ?= ~/projs/htm_alg
+INPUT_HANDLER ?= ~/projs/HeTM_V0/shared
 
 CUDA_UTIL_DIR ?= ~/projs/cuda-utils
 HTM_ARCH_DEPS ?= ~/projs/arch_dep
@@ -17,10 +18,12 @@ INCLUDES := -I $(CUDA_UTIL_DIR)/include \
 	-I $(TSX_ROOT)/include \
 	-I $(CUDA_PATH)/include \
 	-I $(CURR_DIR)/include \
+	-I $(INPUT_HANDLER)/include \
 #
 DEFINES  :=
 #
 LIBS     := \
+	-L $(INPUT_HANDLER) -linput_handler \
 	-L $(CUDA_PATH)/lib64 -lcudart -lcuda -lcuda-util \
 	-L $(TINY_ROOT)/lib -lstm -lpthread \
 #

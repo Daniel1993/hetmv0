@@ -7,6 +7,8 @@ HETM_ROOT     ?= $(CURR_DIR)/../hetm
 HTM_SGL       ?= ~/projs/htm_alg
 PR_STM_DIR    ?= ~/projs/pr-stm
 CUDA_PATH     ?= /usr/local/cuda
+SHARED        ?= ~/projs/HeTM_V0/shared_bench
+INPUT_HANDLER ?= ~/projs/HeTM_V0/shared
 
 CUDA_UTIL_DIR ?= ~/projs/cuda-utils
 HTM_ARCH_DEPS ?= ~/projs/arch_dep
@@ -20,11 +22,14 @@ INCLUDES := -I $(CUDA_UTIL_DIR)/include \
 	-I $(TINY_ROOT)/include \
 	-I $(TSX_ROOT)/include \
 	-I $(HETM_ROOT)/include \
+	-I $(INPUT_HANDLER)/include \
+	-I $(SHARED)/include \
 	-I $(TINY_ROOT)/src
 #
 DEFINES  :=
 #
 LIBS     := -L $(CUDA_PATH)/lib64 -lcudart -lcuda \
+	-L $(INPUT_HANDLER) -linput_handler \
 	-L $(TINY_ROOT)/lib -lstm -lpthread \
 	-L $(HETM_ROOT) -lhetm \
 	-L $(CUDA_UTIL_DIR) -lcuda-util
@@ -78,7 +83,7 @@ MEMCD_OBJS  := \
 	$(SRC)/memcd2.o \
 	$(SRC)/bankKernel.o \
 	$(SRC)/cmp_kernels.o \
-	$(SRC)/shared.o \
+	$(SHARED)/src/shared.o \
 	$(SRC)/setupKernels.o \
 	$(SRC)/memcdKernel.o \
 	$(SRC)/kernel.o
@@ -91,7 +96,7 @@ all: $(APP)
 	# Done
 
 simple: $(OBJS)
-	$(CXX) $(CXXFLAGS) -O3 -o $(SRC)/memcd2.o $(SRC)/memcd2.cpp
+	$(CXX) $(CXXFLAGS) -O1 -o $(SRC)/memcd2.o $(SRC)/memcd2.cpp
 	$(NVCC) $(LDFLAGS) -o $(APP) $(OBJS)
 
 # TODO: propagate PR_MAX_RWSET_SIZE and HETM_CMP_TYPE
@@ -108,6 +113,7 @@ $(APP): $(OBJS)
 		CFG=$(CFG) \
 		PROFILE=$(PROFILE) \
 		INST_CPU=$(INST_CPU) \
+		USE_UNIF_MEM=$(USE_UNIF_MEM) \
 		HETM_DISABLE_CHUNKS=$(DHETM_DISABLE_CHUNKS) \
 		PRINT_DEB=$(PRINT_DEB)
 	@echo " ============================================ "
@@ -134,6 +140,7 @@ $(APP): $(OBJS)
 		PR_MAX_RWSET_SIZE=$(PR_MAX_RWSET_SIZE) \
 		CFG=$(CFG) \
 		INST_CPU=$(INST_CPU) \
+		USE_UNIF_MEM=$(USE_UNIF_MEM) \
 		HETM_DISABLE_CHUNKS=$(DHETM_DISABLE_CHUNKS) \
 		PRINT_DEB=$(PRINT_DEB)
 	@echo " ============================================ "
@@ -148,11 +155,12 @@ $(APP): $(OBJS)
 		CFG=$(CFG) \
 		PROFILE=$(PROFILE) \
 		INST_CPU=$(INST_CPU) \
+		USE_UNIF_MEM=$(USE_UNIF_MEM) \
 		HETM_DISABLE_CHUNKS=$(DHETM_DISABLE_CHUNKS) \
 		PRINT_DEB=$(PRINT_DEB)
 	@echo "Linking..."
 	### TODO: optimization breaks performance
-	# $(CXX) $(CXXFLAGS) -O3 -o $(SRC)/memcd2.o $(SRC)/memcd2.cpp
+	$(CXX) $(CXXFLAGS) -O1 -o $(SRC)/memcd2.o $(SRC)/memcd2.cpp
 	$(NVCC) $(LDFLAGS) -o $@ $(OBJS)
 
 %.o:	%.c

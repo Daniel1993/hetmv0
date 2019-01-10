@@ -30,10 +30,14 @@
 #define PR_ARGS_S_EXT \
 	typedef struct { \
 		void *dev_rset; \
+		void *dev_rset_cache; \
 		long *state; /* TODO: this is benchmark specific */ \
 		void *devMemPoolBasePtr, *hostMemPoolBasePtr; \
 		void *devChunks; \
 		memman_bmap_s *bmap; \
+		memman_bmap_s *bmapBackup; \
+		long batchCount; \
+		int isGPUOnly; \
 		HeTM_GPU_log_explicit_s /* Explicit log only */ \
 	} HeTM_GPU_log_s \
 //
@@ -105,15 +109,26 @@
 	HeTM_GPU_log_explicit_prepare /* this selects other memory */ \
 	/* ---------------------- */ \
 	GPU_log->dev_rset = HeTM_shared_data.rsetLog; \
+	GPU_log->dev_rset_cache = HeTM_shared_data.wsetCacheConfl; \
 	GPU_log->devMemPoolBasePtr  = HeTM_shared_data.devMemPool; \
 	GPU_log->hostMemPoolBasePtr = HeTM_shared_data.hostMemPool; \
 	GPU_log->state = (long*)HeTM_shared_data.devCurandState; /* TODO: application specific */ \
 	GPU_log->devChunks = HeTM_shared_data.devChunks; \
+	GPU_log->batchCount = HeTM_shared_data.batchCount; \
+	GPU_log->isGPUOnly = (HeTM_shared_data.isCPUEnabled == 0); \
+	/* ---------------------- */ \
 	memman_select("HeTM_mempool_bmap"); \
 	memman_cpy_to_gpu(NULL, NULL); \
 	memman_bmap_s *bmap = (memman_bmap_s*)memman_get_cpu(NULL); \
 	GPU_log->bmap = (memman_bmap_s*)memman_get_gpu(NULL); \
 	CUDA_CHECK_ERROR(cudaMemset(bmap->dev, 0, bmap->div), ""); \
+	/* ---------------------- */ \
+	memman_select("HeTM_mempool_backup_bmap"); \
+	memman_cpy_to_gpu(NULL, NULL); \
+	memman_bmap_s *bmapBackup = (memman_bmap_s*)memman_get_cpu(NULL); \
+	GPU_log->bmapBackup = (memman_bmap_s*)memman_get_gpu(NULL); \
+	CUDA_CHECK_ERROR(cudaMemset(bmapBackup->dev, 0, bmapBackup->div), ""); \
+	/* ---------------------- */ \
 	args->host.pr_args_ext = (void*)GPU_log; \
 	memman_select("HeTM_gpuLog"); \
 	args->dev.pr_args_ext = memman_get_gpu(NULL); \
@@ -147,12 +162,27 @@
 /*if (GPU_log->explicitLogOffThr[tid_]==98) printf("[%i] explicitLogOffset=%i, explicitLogOffThr=%i, i=%i\n", (int)tid_,\
 (int)explicitLogOffset, (int)GPU_log->explicitLogOffThr[tid_], i);*/ \
 #elif HETM_CMP_TYPE == HETM_CMP_COMPRESSED
+
+#if HETM_LOG_TYPE == HETM_BMAP_LOG
+#define SET_ON_BMAP \
+	uintptr_t _pos_cache = _pos >> DEFAULT_BITMAP_GRANULARITY_BITS; \
+	void *_RSetBitmap = GPU_log->dev_rset; \
+	void *_RSetBitmap_cache = GPU_log->dev_rset_cache; \
+	ByteM_SET_POS(_pos_cache, _RSetBitmap_cache, GPU_log->batchCount); \
+	ByteM_SET_POS(_pos, _RSetBitmap, GPU_log->batchCount) \
+//
+#else /* VERS */
+#define SET_ON_BMAP \
+	void *_RSetBitmap = GPU_log->dev_rset; \
+	ByteM_SET_POS(_pos, _RSetBitmap, GPU_log->batchCount) \
+//
+#endif
+
 #define SET_ON_LOG(addr) \
 	uintptr_t _rsetAddr = (uintptr_t)(addr); \
 	uintptr_t _devBAddr = (uintptr_t)GPU_log->devMemPoolBasePtr; \
 	uintptr_t _pos = (_rsetAddr - _devBAddr) >> PR_LOCK_GRAN_BITS; \
-	unsigned short *_RSetBitmap = (unsigned short*)GPU_log->dev_rset; \
-	ByteM_SET_POS(_pos, _RSetBitmap) \
+	SET_ON_BMAP \
 //
 #else
 // error or disabled
@@ -162,24 +192,33 @@
 #ifdef PR_AFTER_VAL_LOCKS_EXT
 #undef PR_AFTER_VAL_LOCKS_EXT
 #endif
+// also addes the write to the backup (case that we need to invalidate the CPU)
+#if HETM_CMP_TYPE == HETM_CMP_DISABLED
+#define PR_AFTER_VAL_LOCKS_EXT(args) /* empty */
+#else /* HETM_CMP_TYPE != HETM_CMP_DISABLED */
 #define PR_AFTER_VAL_LOCKS_EXT(args) ({ \
   int i; \
 	HeTM_GPU_log_s *GPU_log = (HeTM_GPU_log_s*)args->pr_args_ext; \
 	/* TODO: explicit log only */ \
-	HeTM_GPU_log_explicit_before_reads \
-	/* ---------------------- */ \
-	/* add read to devLogR */ \
-	for (i = 0; i < args->rset.size; i++) { \
-		SET_ON_LOG(args->rset.addrs[i]); \
+	if (!GPU_log->isGPUOnly) { \
+		HeTM_GPU_log_explicit_before_reads \
+		/* ---------------------- */ \
+		/* add read to devLogR */ \
+		for (i = 0; i < args->rset.size; i++) { \
+			SET_ON_LOG(args->rset.addrs[i]); \
+		} \
+		for (i = 0; i < args->wset.size; i++) { \
+			/* this is avoided through a memcpy D->D after batch */ \
+			/*memman_access_addr_dev(GPU_log->bmapBackup, args->wset.addrs[i], 1);*/ \
+			memman_access_addr_dev(GPU_log->bmap, args->wset.addrs[i], 1); \
+		} \
+		/* TODO: explicit logOnly */ \
+		HeTM_GPU_log_explicit_after_reads /* offset of the next transaction */ \
+		/* ---------------------- */ \
 	} \
-	/*memman_access_addr_dev(GPU_log->bmap, args->rset.addrs[i]);*/ \
-	for (i = 0; i < args->wset.size; i++) { \
-		memman_access_addr_dev(GPU_log->bmap, args->wset.addrs[i]); \
-	} \
-	/* TODO: explicit logOnly */ \
-	HeTM_GPU_log_explicit_after_reads /* offset of the next transaction */ \
-	/* ---------------------- */ \
 }) \
+//
+#endif /* HETM_CMP_TYPE == HETM_CMP_DISABLED */
 
 #ifdef PR_AFTER_WRITEBACK_EXT
 #undef PR_AFTER_WRITEBACK_EXT

@@ -136,6 +136,12 @@ static void* offloadThread(void*)
 {
   HeTM_async_req_s *req;
 
+  cpu_set_t my_set;
+  CPU_ZERO(&my_set);
+  int core = threadMapFunction(55); // last thread
+  CPU_SET(core, &my_set);
+  sched_setaffinity(0, sizeof(cpu_set_t), &my_set);
+
   while (!HeTM_async_is_stop() || !hetm_pc_is_empty(HeTM_offload_pc)) {
     hetm_pc_consume(HeTM_offload_pc, (void**)&req);
     req->fn(req->args);
@@ -159,6 +165,12 @@ static void* threadWait(void *argPtr)
   // TODO: each thread runs on one core only (more complex schedules not allowed)
   if (threadId != idGPU) { // only pin STM threads
     core = threadMapFunction(threadId);
+    CPU_SET(core, &my_set);
+    sched_setaffinity(0, sizeof(cpu_set_t), &my_set);
+  }
+
+  if (threadId == idGPU) {
+    core = threadMapFunction(54); // last thread
     CPU_SET(core, &my_set);
     sched_setaffinity(0, sizeof(cpu_set_t), &my_set);
   }

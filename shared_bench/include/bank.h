@@ -218,6 +218,11 @@ struct thread_data {
 	int access_controller;
 	int access_offset;
 
+	long CPU_backoff;
+
+	double GPU_steal_prob;
+	double CPU_steal_prob;
+
 	TIMER_T start;
 	TIMER_T end;
 	TIMER_T last;

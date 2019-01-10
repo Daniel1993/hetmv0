@@ -25,11 +25,9 @@ static void exitThread(int id, void *data);
 #if HETM_LOG_TYPE != HETM_BMAP_LOG
 static int consecutiveFlagCpy = 0; // avoid consecutive copies
 
-thread_local static int reachedTheEnd = 0; // avoid consecutive copies
 thread_local static int inBackoff = 0;
 thread_local static int nbCpyRounds = 0;
 thread_local static int doneWithLog = 0;
-static volatile int countDoneWithLog = 0;
 
 static int launchCmpKernel(HeTM_thread_s*, size_t wsetSize);
 static void checkCmpDone();
@@ -38,7 +36,7 @@ static void cpyWSetToGPU();
 static void asyncCpy(void *argsPtr);
 static void asyncCmp(void *argsPtr);
 static void asyncGetInterConflFlag(void*);
-#endif
+#endif /* HETM_LOG_TYPE != HETM_BMAP_LOG */
 
 void HeTM_cpu_thread()
 {
@@ -75,8 +73,10 @@ void HeTM_cpu_thread()
 #else /* HETM_LOG_TYPE == HETM_BMAP_LOG */
       if (HeTM_get_GPU_status() == HETM_BATCH_DONE) {
         NVTX_PUSH_RANGE("blocked", NVTX_PROF_BLOCK);
+        __sync_add_and_fetch(&HeTM_shared_data.threadsWaitingSync, 1);
         HeTM_sync_barrier(); // just block and let the GPU do its thing
         HeTM_sync_barrier();
+        __sync_add_and_fetch(&HeTM_shared_data.threadsWaitingSync, -1);
         NVTX_POP_RANGE();
       }
 #endif /* HETM_LOG_TYPE != HETM_BMAP_LOG */
@@ -120,6 +120,9 @@ static void initThread(int id, void *data)
   cudaEventCreate(&HeTM_thread_data->cpyWSetStopEvent);
   cudaEventCreate(&HeTM_thread_data->cpyDatasetStartEvent);
   cudaEventCreate(&HeTM_thread_data->cpyDatasetStopEvent);
+
+  hetm_batchCount = &HeTM_shared_data.batchCount; // TODO: same code in GPU!!!
+
   for (auto it = beforeCPU.begin(); it != beforeCPU.end(); ++it) {
     HeTM_callback clbk = *it;
     clbk(id, data);
@@ -214,8 +217,16 @@ static void enterBackoffFn()
 
 static void cpyWSetToGPU()
 {
-  // did the GPU finished the batch?
-  if (HeTM_get_GPU_status() != HETM_BATCH_DONE) return;
+  // did the GPU finished the batch? HeTM_get_GPU_status() is a MACRO
+  if (HeTM_get_GPU_status() != HETM_BATCH_DONE
+    && HeTM_get_GPU_status() != HETM_GPU_IDLE) return;
+
+  if (HeTM_get_GPU_status() == HETM_GPU_IDLE) {
+    // The GPU is IDLE, lets push some writes into the GPU right away
+    // continue in case there isn't enough log
+    nbCpyRounds = HeTM_thread_data->wSetLog->size / STM_LOG_BUFFER_SIZE;
+    if (nbCpyRounds < 1 || !HeTM_thread_data->isCpyDone || !HeTM_thread_data->isCmpDone) return;
+  }
 
   if (!inBackoff) {
     nbCpyRounds = HeTM_thread_data->wSetLog->size / STM_LOG_BUFFER_SIZE;
@@ -270,18 +281,20 @@ static void cpyWSetToGPU()
   }
 
   __sync_synchronize();
-	if (countDoneWithLog == HeTM_shared_data.nbCPUThreads) {
+	if (HeTM_shared_data.threadsWaitingSync == HeTM_shared_data.nbCPUThreads && doneWithLog) {
     // can only enter here if no cpy or cmp is running
 		/* stop sending comparison kernels to the GPU */
     cmpBlockApply();
-	} else if (HeTM_thread_data->nbCmpLaunches < nbCpyRounds) {
+    // HeTM_sync_barrier(); // /* Wake up GPU controller thread */
+    // HeTM_sync_barrier(); // /* wait to set the cuda_stop flag to 0 */
+	} else if (HeTM_thread_data->nbCmpLaunches <= nbCpyRounds) {
     // --------------------------------------
     // continue running the CPU
     enterBackoffFn();
     // --------------------------------------
   } else if (!doneWithLog) {
     doneWithLog = 1;
-    __sync_add_and_fetch(&countDoneWithLog, 1);
+    __sync_add_and_fetch(&HeTM_shared_data.threadsWaitingSync, 1);
     HeTM_thread_data->statusCMP = HETM_CMP_BLOCK;
   }
   HeTM_thread_data->nbCmpLaunches++; // TODO: case that CPU is faster than GPU
@@ -323,7 +336,7 @@ static void cmpBlockApply()
     HeTM_thread_data->backoffBegTimer, HeTM_thread_data->backoffEndTimer
   );
 
-  if (curNodeSize > 0 && !HeTM_is_interconflict()) {
+  if (curNodeSize > 0 && !(HeTM_is_interconflict() && HeTM_shared_data.policy == HETM_CPU_INV)) {
     // must block
     i = 0;
     while (
@@ -395,7 +408,7 @@ static void cmpBlockApply()
 
       // wait flag?
 
-      if (HeTM_is_interconflict()) break;
+      if (HeTM_is_interconflict() && HeTM_shared_data.policy == HETM_CPU_INV) break;
       i++;
     } /* while not empty */
   }  /* no inter-conflict */
@@ -416,9 +429,8 @@ static void cmpBlockApply()
   HeTM_thread_data->statusCMP = HETM_CMP_OFF;
   HeTM_thread_data->nbCmpLaunches = 0;
 
-  reachedTheEnd = 0; // reset
   doneWithLog = 0;
-  __sync_add_and_fetch(&countDoneWithLog, -1);
+  __sync_add_and_fetch(&HeTM_shared_data.threadsWaitingSync, -1);
 }
 
 static int launchCmpKernel(HeTM_thread_s *threadData, size_t wsetSize)
@@ -433,7 +445,7 @@ static int launchCmpKernel(HeTM_thread_s *threadData, size_t wsetSize)
   TIMER_READ(threadData->beforeCmpKernel);
 
   // PROBLEM --> the wsetSize is 0 because it was already copied
-  if (HeTM_is_interconflict() || wsetSize == 0) {
+  if ((HeTM_is_interconflict() && HeTM_shared_data.policy == HETM_CPU_INV) || wsetSize == 0) {
     HETM_DEB_THRD_CPU("Thread %i decided not to CMP (isConfl=%i, wsetSize=%i)",
       threadData->id, HeTM_is_interconflict(), wsetSize);
     threadData->isCmpDone = 1; // TODO: put global
@@ -526,11 +538,10 @@ static void checkCmpDone()
 {
   if (HeTM_thread_data->isCmpDone) {
     // No limit for the number of rounds
-    if (/*HeTM_thread_data->nbCmpLaunches >= HETM_MAX_CMP_KERNEL_LAUNCHES
-        || */HeTM_is_interconflict()) {
+    if (HeTM_is_interconflict() && HeTM_shared_data.policy == HETM_CPU_INV) {
       if (!doneWithLog) {
         doneWithLog = 1;
-        __sync_add_and_fetch(&countDoneWithLog, 1);
+        __sync_add_and_fetch(&HeTM_shared_data.threadsWaitingSync, 1);
       }
       HeTM_thread_data->statusCMP = HETM_CMP_BLOCK;
       __sync_synchronize();

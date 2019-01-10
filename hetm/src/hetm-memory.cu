@@ -19,10 +19,6 @@ static map<void*, size_t> alloced;
 static map<void*, size_t> freed;
 static size_t curSize;
 
-// #define DEFAULT_BITMAP_GRANULARITY_BITS (12) // 4kB --> then I use a smart copy
-// #define DEFAULT_BITMAP_GRANULARITY (0x1<<12)
-#define DEFAULT_BITMAP_GRANULARITY_BITS (15) // 32kB --> then I use a smart copy
-#define DEFAULT_BITMAP_GRANULARITY (0x1<<15)
 static size_t bitmapGran = DEFAULT_BITMAP_GRANULARITY;
 // static size_t bitmapGranBits = DEFAULT_BITMAP_GRANULARITY_BITS;
 
@@ -48,6 +44,7 @@ static void init_interConflFlag();
 int HeTM_mempool_init(size_t pool_size)
 {
   size_t nbGranules = pool_size / PR_LOCK_GRANULARITY;
+  size_t nbChunks;
 
   init_mempool(pool_size);
 
@@ -67,11 +64,19 @@ int HeTM_mempool_init(size_t pool_size)
   init_interConflFlag();
   init_RSetWSet(pool_size);
 
+  nbChunks = pool_size / DEFAULT_BITMAP_GRANULARITY;
+  if (nbGranules % DEFAULT_BITMAP_GRANULARITY > 0) nbChunks++;
+  HeTM_shared_data.nbChunks = nbChunks;
+
+  // printf(" <<<<<<< HeTM_shared_data.devMemPoolBackupBmap = %p\n",  HeTM_shared_data.devMemPoolBackupBmap);
+
   HeTM_set_global_arg((HeTM_knl_global_s){
     .devMemPoolBasePtr  = HeTM_shared_data.devMemPool,
-#if HETM_LOG_TYPE == HETM_ADDR_LOG || HETM_LOG_TYPE == HETM_BMAP_LOG
+// #if HETM_LOG_TYPE == HETM_ADDR_LOG || HETM_LOG_TYPE == HETM_BMAP_LOG
+    // .devMemPoolBackupBasePtr = HeTM_shared_data.devMemPoolBackup,
     .devMemPoolBackupBasePtr = HeTM_shared_data.devMemPoolBackup,
-#endif
+    .devMemPoolBackupBmap = ((memman_bmap_s*)HeTM_shared_data.devMemPoolBackupBmap)->dev,
+// #endif
     .hostMemPoolBasePtr = HeTM_shared_data.hostMemPool,
     .versions           = HeTM_shared_data.devVersions,
     .isInterConfl       = HeTM_shared_data.devInterConflFlag,
@@ -83,8 +88,10 @@ int HeTM_mempool_init(size_t pool_size)
     .hostWSetCacheConfl = HeTM_shared_data.wsetCacheConfl,
     .hostWSetCacheSize  = HeTM_shared_data.wsetCacheSize,
     .hostWSetCacheBits  = HeTM_shared_data.wsetCacheBits,
+    .hostWSetChunks     = nbChunks,
     .PRLockTable        = PR_lockTableDev,
-    .randState          = HeTM_shared_data.devCurandState
+    .randState          = HeTM_shared_data.devCurandState,
+    .isGPUOnly          = (HeTM_shared_data.isCPUEnabled == 0)
   });
 
   curSize = 0;
@@ -125,15 +132,19 @@ void HeTM_destroyCurandState()
 
 int HeTM_mempool_cpy_to_cpu(size_t *copiedSize)
 {
+#ifndef USE_UNIF_MEM
   memman_select("HeTM_mempool");
   memman_cpy_to_cpu(HeTM_memStream, copiedSize);
   return 0; // TODO: error code
+#endif /* USE_UNIF_MEM */
 }
 
 int HeTM_mempool_cpy_to_gpu(size_t *copiedSize)
 {
+#ifndef USE_UNIF_MEM
   memman_select("HeTM_mempool");
   memman_cpy_to_gpu(HeTM_memStream, copiedSize);
+#endif /* USE_UNIF_MEM */
   return 0; // TODO: error code
 }
 
@@ -175,7 +186,7 @@ void HeTM_wset_log_cpy_to_gpu(
   CUDA_CHECK_ERROR(cudaStreamAddCallback(
     stream, cpyCallback, threadData, 0
   ), "");
-  __sync_synchronize();
+  COMPILER_FENCE();
   if (threadData->nbCpyDone >= threadData->countCpy) {
     threadData->isCpyDone = 1;
   }
@@ -188,7 +199,7 @@ void HeTM_wset_log_cpy_to_gpu(
 void HeTM_wset_log_cpy_to_gpu(
   HeTM_thread_s *threadData, chunked_log_node_s *node, size_t *size
 ) {
-  void *res, *topAddr;
+  void *res;
   HeTM_CPULogEntry *resAux;
   size_t sizeRes = 0, sizeToCpy, sizeBuffer, nbEntries;
   chunked_log_node_s *logAux;
@@ -200,7 +211,6 @@ void HeTM_wset_log_cpy_to_gpu(
 
   res = HeTM_shared_data.wsetLog;
   resAux = (HeTM_CPULogEntry*)res;
-  topAddr = (void*) (resAux + HeTM_shared_data.wsetLogSize);
   resAux += tid*sizeBuffer; // each thread has a bit of the buffer
   // TODO: this memset is needed
   // CUDA_CHECK_ERROR(cudaMemsetAsync(resAux, 0, sizeBuffer*sizeof(HeTM_CPULogEntry)), "");
@@ -347,25 +357,54 @@ static void CUDART_CB cpyCallback(cudaStream_t event, cudaError_t status, void *
 }
 #endif
 
-static void init_mempool(size_t pool_size) {
-  memman_alloc_dual("HeTM_mempool", pool_size, MEMMAN_NONE); // TODO: trade-offs with MEMMAN_UNIF
+static void init_mempool(size_t pool_size)
+{
+  size_t granBmap;
+#ifdef USE_UNIF_MEM
+  memman_alloc_dual("HeTM_mempool", pool_size, MEMMAN_UNIF);
+#else /* !USE_UNIF_MEM */
+  memman_alloc_dual("HeTM_mempool", pool_size, MEMMAN_NONE);
+#endif /* USE_UNIF_MEM */
   HeTM_shared_data.devMemPool  = memman_get_gpu(NULL);
-
-  // bmap for the data-set chunking
-  memman_create_bitmap(memman_get_cpu(NULL), memman_get_gpu(NULL), bitmapGran);
-  memman_bitmap_gpu(); // creates in GPU (TODO: change name)
-#ifdef HETM_DISABLE_CHUNKS // TODO: ADD YET ANOTHER FLAG!!!
-  memman_set_is_bmapped(0, 0);
-#else /* HETM_CHUNKS enabled */
-  memman_set_is_bmapped(0, 1);
-#endif /* HETM_DISABLE_CHUNKS */
-  memman_bmap_s *mainBMap = (memman_bmap_s*) memman_get_bmap(NULL);
-  memman_alloc_gpu("HeTM_mempool_bmap", sizeof(memman_bmap_s), mainBMap, MEMMAN_NONE);
-
-  memman_select("HeTM_mempool");
   HeTM_shared_data.hostMemPool = memman_get_cpu(NULL);
   HeTM_shared_data.sizeMemPool = pool_size;
   stm_baseMemPool = HeTM_shared_data.hostMemPool;
+
+  // bmap for the data-set chunking
+  // TODO: bitmap is x4B larger (does not take in account ints of 4B)
+  memman_create_bitmap(HeTM_shared_data.hostMemPool, HeTM_shared_data.devMemPool, bitmapGran);
+  memman_bitmap_gpu(); // creates in GPU (TODO: change name)
+  memman_bmap_s *mainBMap = (memman_bmap_s*) memman_get_bmap(&granBmap);
+  stm_devMemPoolBmap = mainBMap;
+
+#ifdef HETM_DISABLE_CHUNKS // TODO: ADD YET ANOTHER FLAG!!!
+  memman_set_is_bmapped(0, 0);
+  memman_alloc_gpu("HeTM_mempool_backup", pool_size,
+    HeTM_shared_data.hostMemPool, MEMMAN_NONE);
+  HeTM_shared_data.devMemPoolBackup = memman_get_gpu(NULL);
+  HeTM_shared_data.devMemPoolBackupBmap = memman_get_bmap(NULL);
+  stm_devMemPoolBackupBmap = NULL;
+#else /* HETM_CHUNKS enabled */
+  memman_set_is_bmapped(1, 1);
+  memman_alloc_gpu("HeTM_mempool_backup", pool_size,
+    HeTM_shared_data.hostMemPool, MEMMAN_NONE);
+  memman_create_bitmap(memman_get_cpu(NULL), memman_get_gpu(NULL), bitmapGran);
+  memman_bitmap_gpu(); // creates in GPU (TODO: change name)
+  memman_bmap_s *backupBMap = (memman_bmap_s*) memman_get_bmap(NULL);
+  stm_devMemPoolBackupBmap = backupBMap;
+
+  memman_attach_bmap(stm_devMemPoolBackupBmap, granBmap);
+  memman_set_is_bmapped(1, 1);
+  HeTM_shared_data.devMemPoolBackup = memman_get_gpu(NULL);
+  HeTM_shared_data.devMemPoolBackupBmap = memman_get_bmap(NULL);
+#endif /* HETM_DISABLE_CHUNKS */
+
+  // memman_select("HeTM_mempool");
+  // memman_bmap_s *mainBMap = (memman_bmap_s*) memman_get_bmap(NULL);
+
+  // TODO: what is this doing?
+  memman_alloc_gpu("HeTM_mempool_backup_bmap", sizeof(memman_bmap_s), backupBMap, MEMMAN_NONE);
+  memman_alloc_gpu("HeTM_mempool_bmap", sizeof(memman_bmap_s), mainBMap, MEMMAN_NONE);
 }
 
 static void init_interConflFlag() {
@@ -375,7 +414,7 @@ static void init_interConflFlag() {
 }
 
 static void init_RSetWSet(size_t pool_size) {
-  size_t sizeRSetLog;
+  size_t sizeRSetLog = 0;
 
 #if HETM_CMP_TYPE == HETM_CMP_EXPLICIT
   sizeRSetLog = HeTM_shared_data.nbGPUThreads*HeTM_shared_data.nbGPUBlocks
@@ -386,6 +425,7 @@ static void init_RSetWSet(size_t pool_size) {
 #else
     // Error or disabled
 #endif
+
   if (sizeRSetLog > 0) {
     // Inits GPU read-set log
     memman_alloc_gpu("HeTM_dev_rset", sizeRSetLog, NULL, 0);
@@ -416,9 +456,9 @@ static void init_bmap(size_t pool_size)
   size_t nbGranules = pool_size / PR_LOCK_GRANULARITY;
   size_t granBmap;
 
-  size_t cacheSize = nbGranules / CACHE_GRANULE_SIZE;
+  size_t cacheSize = pool_size / CACHE_GRANULE_SIZE; // nbGranules / CACHE_GRANULE_SIZE;
 
-  if (nbGranules % CACHE_GRANULE_SIZE > 0) {
+  if (pool_size % CACHE_GRANULE_SIZE > 0) {
     cacheSize++;
   }
 
@@ -431,20 +471,19 @@ static void init_bmap(size_t pool_size)
   memman_bmap_s *mainBMap = (memman_bmap_s*) memman_get_bmap(&granBmap);
 
 #ifdef HETM_DISABLE_CHUNKS
-  memman_alloc_gpu("HeTM_mempool_backup", pool_size,
-    HeTM_shared_data.hostMemPool, MEMMAN_NONE);
-  HeTM_shared_data.devMemPoolBackup = memman_get_gpu(NULL);
-  stm_devMemPoolBackupBmap = NULL;
+  // memman_alloc_gpu("HeTM_mempool_backup", pool_size,
+  //   HeTM_shared_data.hostMemPool, MEMMAN_NONE);
+  // HeTM_shared_data.devMemPoolBackup = memman_get_gpu(NULL);
+  // stm_devMemPoolBackupBmap = NULL;
   memman_alloc_dual("HeTM_cpu_wset", nbGranules, MEMMAN_NONE);
 #else /* HETM CHUNKS ENABLED */
-  memman_alloc_gpu("HeTM_mempool_backup", pool_size,
-    HeTM_shared_data.hostMemPool, MEMMAN_NONE);
-  // memman_create_bitmap(memman_get_cpu(NULL), NULL, bitmapGran);
-  stm_devMemPoolBackupBmap = mainBMap;
-  memman_attach_bmap(stm_devMemPoolBackupBmap, granBmap);
-  memman_set_is_bmapped(1, 0);
-  HeTM_shared_data.devMemPoolBackup = memman_get_gpu(NULL);
-
+  // memman_alloc_gpu("HeTM_mempool_backup", pool_size,
+  //   HeTM_shared_data.hostMemPool, MEMMAN_NONE);
+  // // memman_create_bitmap(memman_get_cpu(NULL), NULL, bitmapGran);
+  // stm_devMemPoolBackupBmap = mainBMap;
+  // memman_attach_bmap(stm_devMemPoolBackupBmap, granBmap);
+  // memman_set_is_bmapped(1, 0);
+  // HeTM_shared_data.devMemPoolBackup = memman_get_gpu(NULL);
   memman_alloc_dual("HeTM_cpu_wset", nbGranules, MEMMAN_NONE);
   memman_attach_bmap(stm_devMemPoolBackupBmap, granBmap / 4); /* 1B maps 4B */
   memman_set_is_bmapped(1, 0); // TODO: this is not working anymore...
@@ -466,6 +505,8 @@ static void init_bmap(size_t pool_size)
   stm_wsetCPUCacheBits           = CACHE_GRANULE_BITS;
 
   memman_select("HeTM_cpu_wset_cache_confl");
+  memman_zero_cpu(NULL);
+  memman_zero_gpu(NULL);
   HeTM_shared_data.wsetCacheConfl = memman_get_gpu(NULL);
 
   memman_select("HeTM_mempool");
@@ -501,16 +542,15 @@ static void init_addr(size_t pool_size)
   HeTM_shared_data.hostMemPool = memman_get_cpu(NULL);
   // TODO: too many combinations
 #ifdef HETM_DISABLE_CHUNKS
-  memman_alloc_gpu("HeTM_mempool_backup", pool_size,
-    HeTM_shared_data.hostMemPool, MEMMAN_NONE);
-  stm_devMemPoolBackupBmap = NULL;
+  // memman_alloc_gpu("HeTM_mempool_backup", pool_size,
+  //   HeTM_shared_data.hostMemPool, MEMMAN_NONE);
+  // stm_devMemPoolBackupBmap = NULL;
 #else /* HETM CHUNKS ENABLED */
-  memman_alloc_gpu("HeTM_mempool_backup", pool_size,
-    HeTM_shared_data.hostMemPool, MEMMAN_NONE);
-  memman_create_bitmap(memman_get_cpu(NULL), NULL, bitmapGran);
-  memman_set_is_bmapped(1, 0);
-  stm_devMemPoolBackupBmap = memman_get_bmap(&granBmap);
-  printf("Got %p\n", stm_devMemPoolBackupBmap);
+  // memman_alloc_gpu("HeTM_mempool_backup", pool_size,
+  //   HeTM_shared_data.hostMemPool, MEMMAN_NONE);
+  // memman_create_bitmap(memman_get_cpu(NULL), NULL, bitmapGran);
+  // memman_set_is_bmapped(1, 0);
+  // stm_devMemPoolBackupBmap = memman_get_bmap(&granBmap);
 #endif /* HETM_DISABLE_CHUNKS */
   HeTM_shared_data.devMemPoolBackup = memman_get_gpu(NULL);
 

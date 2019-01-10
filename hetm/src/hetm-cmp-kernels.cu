@@ -27,32 +27,36 @@ __global__ void HeTM_knl_checkTxBitmapCache(HeTM_knl_cmp_args_s args)
 {
   int id = blockIdx.x*blockDim.x+threadIdx.x;
 
-  // TODO: these must be the same
-  int sizeWSet = args.sizeWSet; /* Size of the entire log */
-  size_t wsetBits = HeTM_knl_global.hostWSetCacheBits;
-  // __shared__ unsigned char isConflShared;
+  size_t nbChunks = HeTM_knl_global.hostWSetChunks;
 
-  // if (id == sizeWSetCache) printf("cache size of %i\n", sizeWSetCache);
+  if (id >= nbChunks) {
+    return; // the thread has nothing to do
+  }
 
-  // need the whole size (each thread matches the GPU read-set with the cache)
-  if (id >= sizeWSet) return; // the thread has nothing to do
-
-  unsigned char *rset = (unsigned char*)HeTM_knl_global.devRSet;
+  // unsigned char *rset = (unsigned char*)HeTM_knl_global.devRSet;
+  unsigned char *rset = (unsigned char*)HeTM_knl_global.hostWSetCacheConfl;
   unsigned char *wset = (unsigned char*)HeTM_knl_global.hostWSetCache;
 
-  int cacheId = id >> wsetBits;
-  unsigned char isNewWrite = wset[cacheId];
+  // int cacheId = id >> wsetBits;
+  // unsigned char isNewWrite = wset[cacheId] == args.batchCount;
+  unsigned char isNewWrite = wset[id] == args.batchCount;
 
   // checks for a chunck of CPU dataset if it was read in GPU (4096 items)
-  int isConfl = rset[id] && isNewWrite;
+  // memman_bmap_s *key_bmap = (memman_bmap_s*)HeTM_knl_global.devMemPoolBackupBmap;
+  // char *bytes = key_bmap->dev;
+  char *bytes = (char*)HeTM_knl_global.devMemPoolBackupBmap;
 
-  // TODO: check if the atomicOr is faster than the if
-  // atomicOr(HeTM_knl_global.isInterConfl, isConfl);
-  // atomicOr(&(((unsigned char*)HeTM_knl_global.hostWSetCacheConfl)[cacheId]), (unsigned char)isConfl);
+  if (isNewWrite) { // TODO: divergency
+    bytes[id] = 1; /*args.batchCount*/
+  }
+  int isConfl = (rset[id] == args.batchCount) && isNewWrite;
+
+  // the rset cache is also used as conflict detection
+  rset[id] = isConfl ? args.batchCount : 0;
 
   if (isConfl) {
     *HeTM_knl_global.isInterConfl = 1;
-    ((unsigned char*)(HeTM_knl_global.hostWSetCacheConfl))[cacheId] = 1;
+    // ((unsigned char*)(HeTM_knl_global.hostWSetCacheConfl))[cacheId] = args.batchCount;
   }
 }
 
@@ -69,14 +73,13 @@ __global__ void HeTM_knl_checkTxBitmap(HeTM_knl_cmp_args_s args, size_t offset)
 
   unsigned char *rset = (unsigned char*)HeTM_knl_global.devRSet;
   unsigned char *wset = (unsigned char*)HeTM_knl_global.hostWSet;
-  // PR_GRANULE_T *a = (PR_GRANULE_T*)HeTM_knl_global.devMemPoolBasePtr;
-  // PR_GRANULE_T *b = (PR_GRANULE_T*)HeTM_knl_global.devMemPoolBackupBasePtr;
 
   // TODO: use shared memory
-  unsigned char isNewWrite = wset[idPlusOffset];
-  unsigned char isConfl = rset[idPlusOffset] && isNewWrite;
+  unsigned char isNewWrite = wset[idPlusOffset] == args.batchCount;
+  unsigned char isConfl = (rset[idPlusOffset] == args.batchCount) && isNewWrite;
 
   if (isConfl) {
+    // printf("[%i] found conflict wset[%i]=%i\n", id, idPlusOffset, (int)wset[idPlusOffset]);
     *HeTM_knl_global.isInterConfl = 1;
   }
   // if (isNewWrite) {
@@ -120,8 +123,8 @@ __global__ void HeTM_knl_writeTxBitmap(HeTM_knl_cmp_args_s args, size_t offset)
 
   // unsigned char *rset = (unsigned char*)HeTM_knl_global.devRSet;
   unsigned char *wset = (unsigned char*)HeTM_knl_global.hostWSet;
-  PR_GRANULE_T *a = (PR_GRANULE_T*)HeTM_knl_global.devMemPoolBasePtr;
-  PR_GRANULE_T *b = (PR_GRANULE_T*)HeTM_knl_global.devMemPoolBackupBasePtr;
+  PR_GRANULE_T *mempool = (PR_GRANULE_T*)HeTM_knl_global.devMemPoolBasePtr;
+  PR_GRANULE_T *backup  = (PR_GRANULE_T*)HeTM_knl_global.devMemPoolBackupBasePtr;
 
   // TODO: use shared memory
   unsigned char isNewWrite = wset[id];
@@ -132,7 +135,7 @@ __global__ void HeTM_knl_writeTxBitmap(HeTM_knl_cmp_args_s args, size_t offset)
   long maskIgnore = condToIgnore; // TODO: for some obscure reason this is -1
 
   // applies -1 if address is invalid OR the index if valid
-  a[id] = (maskIgnore & a[id]) | ((~maskIgnore) & b[id]);
+  mempool[id] = (maskIgnore & mempool[id]) | ((~maskIgnore) & backup[id]);
   // if (isNewWrite) {
   //   a[id] = b[id];
   // }
@@ -395,8 +398,8 @@ __device__ void checkTx_versionLOG(int sizeWSet, int entries_per_thread, int idC
 __device__ void checkTx_versionLOG(int sizeWSet, int sizeRSet, int idCPUThread)
 {
   int id;
-  uintptr_t offset = 0, index = 0;
-  uintptr_t GPU_addr = 0, CPU_addr = 0;
+  uintptr_t index = 0;
+  uintptr_t GPU_addr = 0;
   HeTM_CPULogEntry *fetch_stm = NULL;
   int fetch_gpu = 0;
   unsigned char *logBM = (unsigned char*)HeTM_knl_global.devRSet;
@@ -408,45 +411,41 @@ __device__ void checkTx_versionLOG(int sizeWSet, int sizeRSet, int idCPUThread)
 
   id = blockIdx.x*blockDim.x+threadIdx.x;
 
-  if ((*HeTM_knl_global.isInterConfl) == 0 && id < sizeWSet) { //Check for currently running comparisons
-    fetch_stm = &stm_log[id];
+  if (id >= sizeWSet) return;
 
-    // Find the bitmap index for the CPU access
-    // HeTM_hostMemPoolBasePtr is the base address of the bank accounts
-    // fetch_stm->pos is the CPU address (then converted to an index)
-    // CPU_addr = (uintptr_t)fetch_stm->pos;
-    index = fetch_stm->pos;
+  fetch_stm = &stm_log[id];
 
-    if (index == 0) return; // not defined
+  // Find the bitmap index for the CPU access
+  // HeTM_hostMemPoolBasePtr is the base address of the bank accounts
+  // fetch_stm->pos is the CPU address (then converted to an index)
+  index = fetch_stm->pos;
 
-    index -= 1; // 0 is default value for empty
+  if (index == 0) return; // not defined
 
-    // offset   = CPU_addr - (uintptr_t)HeTM_knl_global.hostMemPoolBasePtr;
-    // GPU_addr = offset + (uintptr_t)a; // TODO: change the name "a" to accounts
-    GPU_addr = (uintptr_t)&(a[index]); // TODO: change the name "a" to accounts
-    // index    = offset >> PR_LOCK_GRAN_BITS;
-    fetch_gpu = ByteM_GET_POS(index, logBM); //logBM[index];
+  index -= 1; // 0 is default value for empty
 
-    if (fetch_gpu != 0) {
-      // CPU and GPU conflict in some address
-      // printf("found confl on index=%lu id=%i (last 4: %i %i %i %i)\n", index, id,
-      //   stm_log[id-4].pos, stm_log[id-3].pos, stm_log[id-2].pos, stm_log[id-1].pos);
-      *HeTM_knl_global.isInterConfl = 1;
-    }
+  GPU_addr = (uintptr_t)&(a[index]); // TODO: change the name "a" to accounts
+  fetch_gpu = ByteM_GET_POS(index, logBM); //logBM[index];
 
-    applyHostWritesOnDev(fetch_stm, GPU_addr, index);
+  if (fetch_gpu != 0) {
+    // CPU and GPU conflict in some address
+    // printf("found confl on index=%lu id=%i (last 4: %i %i %i %i)\n", index, id,
+    //   stm_log[id-4].pos, stm_log[id-3].pos, stm_log[id-2].pos, stm_log[id-1].pos);
+    *HeTM_knl_global.isInterConfl = 1;
   }
+  applyHostWritesOnDev(fetch_stm, GPU_addr, index);
 }
 
 __device__ void applyHostWritesOnDev(
   HeTM_CPULogEntry *fetch_stm, uintptr_t GPU_addr, int index
 ) {
 #if HETM_LOG_TYPE == HETM_VERS_LOG
-  while (fetch_stm && !(*HeTM_knl_global.isInterConfl)) {
+  while (fetch_stm) {
     /* */
     //- TODO: refactor!
     long *vers = (long*)HeTM_knl_global.versions;
     PR_GRANULE_T *a = (PR_GRANULE_T*)HeTM_knl_global.devMemPoolBasePtr;
+    // PR_GRANULE_T *b = (PR_GRANULE_T*)HeTM_knl_global.devMemPoolBackupBasePtr;
     int *mutex = HeTM_knl_global.PRLockTable;
     int *mux     = (int*)&(PR_GET_MTX(mutex, GPU_addr));
     int val      = *mux; // atomic read
@@ -457,21 +456,32 @@ __device__ void applyHostWritesOnDev(
     int pr_version = PR_GET_VERSION(val);
     int pr_owner   = PR_GET_OWNER(val);
     int lockVal    = PR_LOCK_VAL(pr_version, pr_owner);
+    // ---------
+    // - this is what is consuming more time executing (and causing divergency)
+    // ------------------------------------------------------------------------
     if (atomicCAS(mux, val, lockVal) == val) { // LOCK
       // if the comming write is more recent apply, if not ignore
       if (fetch_stm->time_stamp > vers[index]) {
-        // int read = a[index];
-        // if (atomicCAS(&a[index], read, fetch_stm->val) != read) {
-        //   printf(" >>>> Error! concurrent access!\n");
-        // }
-        a[index] = fetch_stm->val; // TODO: apply is changing bank invariant!
+        // TODO: I'm here need to apply on the backup as well (case drop GPU)
+        a[index] = fetch_stm->val;
+        // b[index] = fetch_stm->val;
         vers[index] = fetch_stm->time_stamp; // set GPU version
+
+        // memman_bmap_s *key_bmap = (memman_bmap_s*)HeTM_knl_global.devMemPoolBackupBmap;
+        // char *bytes = key_bmap->dev;
+        char *bytes = (char*)HeTM_knl_global.devMemPoolBackupBmap;
+
+        // index has granularity sizeof(int) --> transform it
+        int chunkIdx = (index << 2) >> DEFAULT_BITMAP_GRANULARITY_BITS;
+        bytes[chunkIdx] = 1;
       }
       atomicCAS(mux, lockVal, 0); // UNLOCK
       break;
     } else if (fetch_stm->time_stamp <= vers[index]) {
       break;
     }
+    // ------------------------------------------------------------------------
+    // break;
   }
 #elif HETM_LOG_TYPE == HETM_ADDR_LOG
   char *vers = (char*)HeTM_knl_global.versions;

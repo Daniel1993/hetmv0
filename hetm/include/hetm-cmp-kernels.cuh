@@ -23,6 +23,7 @@ typedef struct HeTM_knl_cmp_args_ {
 	int sizeWSet; /* Size of the host log */
 	int sizeRSet; /* Size of the device log */
 	int idCPUThr;
+	unsigned char batchCount;
 } HeTM_knl_cmp_args_s;
 
 typedef struct HeTM_cmp_ {
@@ -32,9 +33,10 @@ typedef struct HeTM_cmp_ {
 
 typedef struct HeTM_knl_global_ {
   void *devMemPoolBasePtr;
-#if HETM_LOG_TYPE == HETM_ADDR_LOG || HETM_LOG_TYPE == HETM_BMAP_LOG
+// #if HETM_LOG_TYPE == HETM_ADDR_LOG || HETM_LOG_TYPE == HETM_BMAP_LOG
   void *devMemPoolBackupBasePtr;
-#endif
+  void *devMemPoolBackupBmap;
+// #endif /* HETM_LOG_TYPE == HETM_ADDR_LOG || HETM_LOG_TYPE == HETM_BMAP_LOG */
   void *hostMemPoolBasePtr;
   void *versions;
   int *isInterConfl;
@@ -46,8 +48,10 @@ typedef struct HeTM_knl_global_ {
   void *hostWSetCacheConfl;
   size_t hostWSetCacheSize;
   size_t hostWSetCacheBits;
+	size_t hostWSetChunks;
 	int *PRLockTable;
 	void *randState;
+	int isGPUOnly;
 } HeTM_knl_global_s;
 
 #ifdef __cplusplus

@@ -17,7 +17,8 @@ typedef struct bank {
 typedef struct memcd {
 	account_t *key;   /* keys in global memory */
 	account_t *val;   /* values in global memory */
-	account_t *ts;    /* last access TS in global memory */
+	account_t *ts_CPU;    /* last access TS in global memory */
+	account_t *ts_GPU;    /* last access TS in global memory */
 	account_t *state; /* state in global memory */
 	unsigned *globalTs;
   long nbSets;

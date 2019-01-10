@@ -40,6 +40,8 @@ __constant__ __device__ int   read_intensive_size;
 
 __constant__ __device__ thread_data_t devParsedData;
 
+__device__ static unsigned memcached_global_clock = 0;
+
 /****************************************************************************
  *	KERNELS
  ****************************************************************************/
@@ -173,8 +175,6 @@ __device__ void readIntensive_tx(PR_txCallDefArgs, int txCount)
 
 		resF += (float)PR_read(accounts + idx[j]) * INTEREST_RATE;
 		// resF = cos(resF);
-
-		if (pr_args.is_abort) break;
 #else /* PR-STM disabled */
 		resF += accounts[idx[j]];
 #endif
@@ -184,7 +184,6 @@ __device__ void readIntensive_tx(PR_txCallDefArgs, int txCount)
 
 	__syncthreads();
 #ifndef BANK_DISABLE_PRSTM
-	if (pr_args.is_abort) { PR_txRestart(); } // optimization
 	// TODO: writes in the beginning (less transfers)
 	PR_write(accounts + idx[0], resI); //write changes to write set
 
@@ -194,13 +193,11 @@ __device__ void readIntensive_tx(PR_txCallDefArgs, int txCount)
 	// int target = (id * 2) % nbAccounts;
 	// PR_write(accounts + target, resI); //write changes to write set
 
-	if (pr_args.is_abort) { PR_txRestart(); }
 #else /* PR-STM disabled */
 	accounts[idx[0]] = resI; //write changes to write set
 #endif
 
 #ifndef BANK_DISABLE_PRSTM
-	if (pr_args.is_abort) { PR_txRestart(); } // optimization
 	PR_txCommit();
 #else
 	if (args.nbCommits != NULL) args.nbCommits[PR_THREAD_IDX]++;
@@ -252,7 +249,6 @@ __device__ void readOnly_tx(PR_txCallDefArgs, int txCount)
 		resF += (float)PR_read(accounts + idx[j]) * INTEREST_RATE;
 		// resF = cos(resF);
 
-		if (pr_args.is_abort) break;
 #else /* PR-STM disabled */
 		resF += accounts[idx[j]];
 #endif
@@ -262,16 +258,13 @@ __device__ void readOnly_tx(PR_txCallDefArgs, int txCount)
 
 	__syncthreads();
 // #ifndef BANK_DISABLE_PRSTM
-// 	if (pr_args.is_abort) { PR_txRestart(); } // optimization
 // 	// TODO: writes in the beginning (less transfers)
 // 	PR_write(accounts + idx[0], resI); //write changes to write set
-// 	if (pr_args.is_abort) { PR_txRestart(); }
 // #else /* PR-STM disabled */
 // 	accounts[idx[0]] = resI; //write changes to write set
 // #endif
 
 #ifndef BANK_DISABLE_PRSTM
-	if (pr_args.is_abort) { PR_txRestart(); } // optimization
 	PR_txCommit();
 #else /* BANK_DISABLE_PRSTM */
 	if (args.nbCommits != NULL) args.nbCommits[PR_THREAD_IDX]++;
@@ -323,7 +316,6 @@ __device__ void update_tx(PR_txCallDefArgs, int txCount)
 		}
 #ifndef BANK_DISABLE_PRSTM
 		count_amount += PR_read(accounts + idx[j]);
-		if (pr_args.is_abort) break; // exits the inner for loop
 #else /* PR-STM disabled */
 		count_amount += accounts[idx[j]];
 #endif
@@ -341,7 +333,6 @@ __device__ void update_tx(PR_txCallDefArgs, int txCount)
 		if (idx[target] < nbAccounts / devParsedData.access_controller) {
 #ifndef BANK_DISABLE_PRSTM
 		PR_write(accounts + idx[target], nval); //write changes to write set
-		if (pr_args.is_abort) break;
 #else /* PR-STM disabled */
 		accounts[idx[target]] = nval; //write changes to write set
 #endif
@@ -353,14 +344,11 @@ __device__ void update_tx(PR_txCallDefArgs, int txCount)
 // 		nval = COMPUTE_TRANSFER(reads[target] + 1); // +money
 // #ifndef BANK_DISABLE_PRSTM
 // 		PR_write(accounts + idx[target], nval); //write changes to write set
-// 		if (pr_args.is_abort) break;
 // #else /* PR-STM disabled */
 // 		accounts[idx[target]] = nval; //write changes to write set
 // #endif
-// 		if (pr_args.is_abort) break; // exits the inner (2x) for-loop
 	}
 #ifndef BANK_DISABLE_PRSTM
-	if (pr_args.is_abort) { PR_txRestart(); }
 	PR_txCommit();
 #else
 	if (args.nbCommits != NULL) args.nbCommits[PR_THREAD_IDX]++;
@@ -408,13 +396,11 @@ __device__ void updateReadOnly_tx(PR_txCallDefArgs, int txCount)
 		}
 #ifndef BANK_DISABLE_PRSTM
 		reads[j] = PR_read(accounts + idx[j]);
-		if (pr_args.is_abort) break; // exits the inner for loop
 #else /* PR-STM disabled */
 		reads[j] = accounts[idx[j]];
 #endif
 	}
 #ifndef BANK_DISABLE_PRSTM
-	if (pr_args.is_abort) { PR_txRestart(); }
 	PR_txCommit();
 #else
 	if (args.nbCommits != NULL) args.nbCommits[PR_THREAD_IDX]++;
@@ -433,7 +419,9 @@ __device__ void updateReadOnly_tx(PR_txCallDefArgs, int txCount)
 */
 __global__ void bankTx(PR_globalKernelArgs)
 {
-	PR_enterKernel();
+	int tid = PR_THREAD_IDX;
+
+	PR_enterKernel(tid);
 
 	int i = 0; //how many transactions one thread need to commit
 	// HeTM_bankTx_input_s *input = (HeTM_bankTx_input_s*)args.inBuf;
@@ -495,11 +483,13 @@ __global__
 // __launch_bounds__(1024, 1) // TODO: what is this for?
 void memcdReadTx(PR_globalKernelArgs)
 {
-	PR_enterKernel();
+	int tid = PR_THREAD_IDX;
+
+	PR_enterKernel(tid);
 
 	int id = threadIdx.x+blockDim.x*blockIdx.x;
 	int wayId = id % (num_ways /*+ devParsedData.trans*/);
-	int targetKey = id / (num_ways + devParsedData.trans); // id of the key that each thread will take
+	int targetKeyIdx = id / (num_ways + devParsedData.trans); // id of the key that each thread will take
 
 	// num_ways threads will colaborate for the same input
 	// REQUIREMENT: 1 block >= num_ways
@@ -508,10 +498,11 @@ void memcdReadTx(PR_globalKernelArgs)
 	PR_GRANULE_T       *keys = (PR_GRANULE_T*)input->key;
 	PR_GRANULE_T  *extraKeys = (PR_GRANULE_T*)input->extraKey;
 	PR_GRANULE_T     *values = (PR_GRANULE_T*)input->val;
-	// PR_GRANULE_T  *extraVals = (PR_GRANULE_T*)input->extraVal;
-	PR_GRANULE_T *timestamps = (PR_GRANULE_T*)input->ts;
+	PR_GRANULE_T  *extraVals = (PR_GRANULE_T*)input->extraVal;
+	PR_GRANULE_T     *ts_CPU = (PR_GRANULE_T*)input->ts_CPU;
+	PR_GRANULE_T     *ts_GPU = (PR_GRANULE_T*)input->ts_GPU;
 	PR_GRANULE_T      *state = (PR_GRANULE_T*)input->state;
-	PR_GRANULE_T   *setUsage = (PR_GRANULE_T*)input->setUsage;
+	// PR_GRANULE_T   *setUsage = (PR_GRANULE_T*)input->setUsage;
 
 	// TODO: out is NULL
 	memcd_get_output_t  *out = (memcd_get_output_t*)input->output;
@@ -521,9 +512,8 @@ void memcdReadTx(PR_globalKernelArgs)
 	int               nbWays = input->nbWays;
 	int            sizeCache = nbSets * nbWays;
 
-
-	// __shared__ int aborted[1024];
-	// if (wayId == 0) aborted[targetKey] = 0;
+	// __shared__ int foundKey[1024];
+	// foundKey[threadIdx.x] = 0;
 	// __syncthreads();
 
 	for (int i = 0; i < devParsedData.trans; ++i) { // num_ways keys
@@ -532,78 +522,123 @@ void memcdReadTx(PR_globalKernelArgs)
 
 	for (int i = 0; i < (nbWays + devParsedData.trans); ++i) { // num_ways keys
 		// TODO: for some reason input_key == 0 does not work --> PR-STM loops forever
-		int input_key = input_keys[targetKey + i]; // input size is well defined
-		int target_set = input_key % nbSets;
+		int alreadyTakenClock = 0;
+		unsigned memcd_clock_val;
+		int takeClockRetries = 0;
+		PR_txBegin();
+		int input_key = input_keys[targetKeyIdx + i]; // input size is well defined
+
+		// int target_set = input_key % nbSets;
+		// int thread_pos = target_set*nbWays + wayId;
+#if BANK_PART == 1 /* use MOD 3 */
+		int mod_key = input_key % nbSets;
+		int target_set = (mod_key / 3 + (mod_key % 3) * (nbSets / 3)) % nbSets;
+#else /* use MOD 2 */
+		int mod_key = input_key % nbSets;
+		int target_set = (mod_key / 2 + (mod_key % 2) * (nbSets / 2)) % nbSets;
+#endif
+		// int mod_key = input_key % nbSets;
+		// int target_set = mod_key; // / 3 + (mod_key % 3) * (nbSets / 3);
+
 		int thread_pos = target_set*nbWays + wayId;
+
 		int thread_is_found;
-		PR_GRANULE_T thread_key;
+		volatile PR_GRANULE_T thread_key;
+		// volatile PR_GRANULE_T thread_key_check;
 		PR_GRANULE_T thread_val;
-		// PR_GRANULE_T thread_val1;
-		// PR_GRANULE_T thread_val2;
-		// PR_GRANULE_T thread_val3;
-		// PR_GRANULE_T thread_val4;
-		// PR_GRANULE_T thread_val5;
-		// PR_GRANULE_T thread_val6;
-		// PR_GRANULE_T thread_val7;
+		PR_GRANULE_T thread_val1;
+		PR_GRANULE_T thread_val2;
+		PR_GRANULE_T thread_val3;
+		PR_GRANULE_T thread_val4;
+		PR_GRANULE_T thread_val5;
+		PR_GRANULE_T thread_val6;
+		PR_GRANULE_T thread_val7;
 		PR_GRANULE_T thread_state;
 
 		// PR_write(&timestamps[thread_pos], curr_clock);
 		thread_key = keys[thread_pos];
 		thread_state = state[thread_pos];
 
-		__syncthreads(); // TODO: each num_ways thread helps on processing the targetKey
+		// __syncthreads(); // each num_ways thread helps on processing the targetKey
 
 		// TODO: divergency here
 		thread_is_found = (thread_key == input_key && ((thread_state & MEMCD_VALID) != 0));
+
 		if (thread_is_found) {
-			int nbRetries = 0;
-			int ts;
-			PR_txBegin();
-			if (nbRetries > 1024) {
-				// i--; // TODO: should test the key again
-				// aborted[targetKey] = 1;
-				// printf("Thread%i blocked thread_key=%i thread_pos=%i ts=%i curr_clock=%i\n", id, thread_key, thread_pos, ts, curr_clock);
-				break; // retry, key changed
+			// int nbRetries = 0;
+			int ts_val_CPU, ts_val_GPU;
+			unsigned ts;
+			if (!alreadyTakenClock && takeClockRetries > 2) {
+				memcd_clock_val = atomicAdd(&memcached_global_clock, 1);//memcached_global_clock+1;//
+				alreadyTakenClock = 1;
 			}
-			nbRetries++;
-
-			// PR_read(&keys[thread_pos]);
-			PR_read(&extraKeys[thread_pos]);
-			PR_read(&extraKeys[thread_pos+sizeCache]);
-			PR_read(&extraKeys[thread_pos+2*sizeCache]);
-			// TODO:
-			// if (thread_key != PR_read(&keys[thread_pos])) {
-			// 	i--; // retry, key changed
-			// 	break;
+			if (!alreadyTakenClock) {
+				unsigned memcd_clock_val = PR_read(&memcached_global_clock);//memcached_global_clock+1;//
+				PR_write(&memcached_global_clock, memcd_clock_val + 1);
+				takeClockRetries++;
+			}
+			// if (nbRetries > 32) {
+			// 	aborted[threadIdx.x] = 1;
+			// 	i--; // TODO: should test the key again
+			// 	// aborted[targetKeyIdx] = 1;
+			// 	// printf("Thread%i blocked thread_key=%i thread_pos=%i ts=%i curr_clock=%i\n", id, thread_key, thread_pos, ts, curr_clock);
+			// 	nbRetries = 0;
+			// 	break; // retry, key changed
 			// }
+			// nbRetries++;
+
+			// // TODO: some BUG on verifying the key (blocks PR-STM)
+			// /*thread_key_check = */PR_read(&keys[thread_pos]);
+			// PR_read(&extraKeys[thread_pos]);
+			// PR_read(&extraKeys[thread_pos+sizeCache]);
+			// PR_read(&extraKeys[thread_pos+2*sizeCache]);
+			//
+			// // TODO:
+			// if (thread_key != thread_key_check) {
+			// 	i--; // retry, key changed
+			// 	nbRetries = 0;
+			// 	break; // breaks the PR_txBegin() loop
+			// }
+
+			ts_val_CPU = ts_CPU[thread_pos]; // hack here
+			ts_val_GPU = PR_read(&ts_GPU[thread_pos]);
+			ts = max((unsigned)ts_val_CPU, (unsigned)ts_val_GPU);
+
 			thread_val = PR_read(&values[thread_pos]);
-			// thread_val1 = PR_read(&extraVals[thread_pos]);
-			// thread_val2 = PR_read(&extraVals[thread_pos+sizeCache]);
-			// thread_val3 = PR_read(&extraVals[thread_pos+2*sizeCache]);
-			// thread_val4 = PR_read(&extraVals[thread_pos+3*sizeCache]);
-			// thread_val5 = PR_read(&extraVals[thread_pos+4*sizeCache]);
-			// thread_val6 = PR_read(&extraVals[thread_pos+5*sizeCache]);
-			// thread_val7 = PR_read(&extraVals[thread_pos+6*sizeCache]);
-			ts = PR_read(&timestamps[thread_pos]); // assume read-before-write
-			if (ts < curr_clock && nbRetries < 5) {
-				PR_write(&timestamps[thread_pos], curr_clock);
-				PR_read(&setUsage[target_set]); // "locks" the set
-			}
-			else {
-				timestamps[thread_pos] = curr_clock; // TODO: cannot transactionally write this...
-				PR_read(&setUsage[target_set]); // "locks" the set
+			thread_val1 = PR_read(&extraVals[thread_pos]);
+			thread_val2 = PR_read(&extraVals[thread_pos+sizeCache]);
+			thread_val3 = PR_read(&extraVals[thread_pos+2*sizeCache]);
+			thread_val4 = PR_read(&extraVals[thread_pos+3*sizeCache]);
+			thread_val5 = PR_read(&extraVals[thread_pos+4*sizeCache]);
+			thread_val6 = PR_read(&extraVals[thread_pos+5*sizeCache]);
+			thread_val7 = PR_read(&extraVals[thread_pos+6*sizeCache]);
+
+			if (ts < memcd_clock_val) {
+				PR_write(&ts_GPU[thread_pos], memcd_clock_val);
+				// PR_read(&setUsage[target_set]); // "locks" the set --> only needed for SETs
 			}
 
-			PR_txCommit();
-
-			out[targetKey + i].isFound = 1;
-			out[targetKey + i].value = thread_val/*|thread_val1|thread_val2|thread_val3|thread_val4|thread_val5|thread_val6|thread_val7*/;
+			out[targetKeyIdx + i].isFound = 1;
+			out[targetKeyIdx + i].value = thread_val;
+			out[targetKeyIdx + i].val2 = thread_val1;
+			out[targetKeyIdx + i].val3 = thread_val2;
+			out[targetKeyIdx + i].val4 = thread_val3;
+			out[targetKeyIdx + i].val5 = thread_val4;
+			out[targetKeyIdx + i].val6 = thread_val5;
+			out[targetKeyIdx + i].val7 = thread_val6;
+			out[targetKeyIdx + i].val8 = thread_val7;
+			// for (int j = 0; j < nbWays; ++j) {
+			// 	foundKey[threadIdx.x - wayId + j] = 1;
+			// }
+			// printf("Found key %i \n", input_key);
 		}
-		// if (aborted[targetKey]) {
-		// 	// i--; // repeat this loop // TODO: blocks forever
-		// }
-		// aborted[targetKey] = 0;
+
+		PR_txCommit(); // TODO: do we want tansactions this long?
+
 		// __syncthreads();
+		// if (!foundKey[threadIdx.x]) {
+		// 	printf("Key %i not found \n", input_key);
+		// }
 	}
 
 	PR_exitKernel();
@@ -618,7 +653,9 @@ void memcdReadTx(PR_globalKernelArgs)
  **********************************/
 __global__ void memcdWriteTx(PR_globalKernelArgs)
 {
-	PR_enterKernel();
+	int tid = PR_THREAD_IDX;
+
+	PR_enterKernel(tid);
 
 	// TODO: blockDim.x must be multiple of num_ways --> else this does not work
 	int id = threadIdx.x+blockDim.x*blockIdx.x;
@@ -649,7 +686,8 @@ __global__ void memcdWriteTx(PR_globalKernelArgs)
 	PR_GRANULE_T  *extraKeys = (PR_GRANULE_T*)input->extraKey;
 	PR_GRANULE_T     *values = (PR_GRANULE_T*)input->val;
 	PR_GRANULE_T  *extraVals = (PR_GRANULE_T*)input->extraVal;
-	PR_GRANULE_T *timestamps = (PR_GRANULE_T*)input->ts;
+	PR_GRANULE_T     *ts_CPU = (PR_GRANULE_T*)input->ts_CPU;
+	PR_GRANULE_T     *ts_GPU = (PR_GRANULE_T*)input->ts_GPU;
 	PR_GRANULE_T      *state = (PR_GRANULE_T*)input->state;
 	PR_GRANULE_T   *setUsage = (PR_GRANULE_T*)input->setUsage;
 	int           curr_clock = *((int*)input->curr_clock);
@@ -673,6 +711,7 @@ __global__ void memcdWriteTx(PR_globalKernelArgs)
 	// int checkKey3;
 	int maxRetries = 0;
 
+	// TODO: write kernel is too slow
 	for (int i = 0; i < nbWays + devParsedData.trans; ++i) {
 
 		__syncthreads(); // TODO: check with and without this
@@ -687,13 +726,23 @@ __global__ void memcdWriteTx(PR_globalKernelArgs)
 		// TODO: problem with the GET
 		int input_key = input_keys[targetKey + i]; // input size is well defined
 		int input_val = input_vals[targetKey + i]; // input size is well defined
-		int target_set = input_key % nbSets;
+		// int target_set = input_key % nbSets;
+		// int thread_pos = target_set*nbWays + wayId;
+
+#if BANK_PART == 1 /* use MOD 3 */
+		int mod_key = input_key % nbSets;
+		int target_set = (mod_key / 3 + (mod_key % 3) * (nbSets / 3)) % nbSets;
+#else /* use MOD 2 */
+		int mod_key = input_key % nbSets;
+		int target_set = (mod_key / 2 + (mod_key % 2) * (nbSets / 2)) % nbSets;
+#endif
+
 		int thread_pos = target_set*nbWays + wayId;
 
 		thread_key = keys[thread_pos];
 		// thread_val = values[thread_pos]; // assume read-before-write
 		thread_state = state[thread_pos];
-		thread_ts = timestamps[thread_pos]; // TODO: only needed for evict
+		thread_ts = max(ts_GPU[thread_pos], ts_CPU[thread_pos]); // TODO: only needed for evict
 
 		// TODO: divergency here
 		thread_is_found = (thread_key == input_key && (thread_state & MEMCD_VALID));
@@ -757,7 +806,7 @@ __global__ void memcdWriteTx(PR_globalKernelArgs)
 			// 	break;
 			// }
 			PR_read(&values[thread_pos]); // read-before-write
-			PR_read(&timestamps[thread_pos]); // read-before-write
+			PR_read(&ts_GPU[thread_pos]); // read-before-write
 			// TODO: check if values changed: if yes abort
 			PR_write(&keys[thread_pos], input_key);
 			PR_write(&extraKeys[thread_pos], input_key);
@@ -771,8 +820,8 @@ __global__ void memcdWriteTx(PR_globalKernelArgs)
 			PR_write(&extraVals[thread_pos+4*sizeCache], input_val);
 			PR_write(&extraVals[thread_pos+5*sizeCache], input_val);
 			PR_write(&extraVals[thread_pos+6*sizeCache], input_val);
-			PR_write(&timestamps[thread_pos], curr_clock);
-			PR_read(&setUsage[target_set]);
+			PR_write(&ts_GPU[thread_pos], curr_clock);
+			PR_read(&setUsage[target_set]); // locks this set (if the CPU tries to modify)
 			// TODO: it seems not to reach this if but the nbRetries is needed
 						// if (nbRetries == 8191) printf("thr%i aborted 8191 times for key%i thread_pos=%i rsetSize=%lu, wsetSize=%lu\n",
 						// 	id, input_key, thread_pos, pr_args.rset.size, pr_args.wset.size);
@@ -809,7 +858,7 @@ __global__ void memcdWriteTx(PR_globalKernelArgs)
 			// 	break;
 			// }
 			PR_read(&values[thread_pos]); // read-before-write
-			PR_read(&timestamps[thread_pos]); // read-before-write
+			PR_read(&ts_GPU[thread_pos]); // read-before-write
 			PR_read(&state[thread_pos]); // read-before-write
 			// TODO: check if values changed: if yes abort
 			PR_write(&keys[thread_pos], input_key);
@@ -824,7 +873,7 @@ __global__ void memcdWriteTx(PR_globalKernelArgs)
 			PR_write(&extraVals[thread_pos+4*sizeCache], input_val);
 			PR_write(&extraVals[thread_pos+5*sizeCache], input_val);
 			PR_write(&extraVals[thread_pos+6*sizeCache], input_val);
-			PR_write(&timestamps[thread_pos], curr_clock);
+			PR_write(&ts_GPU[thread_pos], curr_clock);
 			int newState = MEMCD_VALID|MEMCD_WRITTEN;
 			PR_write(&state[thread_pos], newState);
 			PR_txCommit();
@@ -850,7 +899,7 @@ __global__ void memcdWriteTx(PR_globalKernelArgs)
 			// 	break;
 			// }
 			PR_read(&values[thread_pos]); // read-before-write
-			PR_read(&timestamps[thread_pos]); // read-before-write
+			PR_read(&ts_GPU[thread_pos]); // read-before-write
 			// TODO: check if values changed: if yes abort
 			PR_write(&keys[thread_pos], input_key);
 			PR_write(&extraKeys[thread_pos], input_key);
@@ -864,7 +913,7 @@ __global__ void memcdWriteTx(PR_globalKernelArgs)
 			PR_write(&extraVals[thread_pos+4*sizeCache], input_val);
 			PR_write(&extraVals[thread_pos+5*sizeCache], input_val);
 			PR_write(&extraVals[thread_pos+6*sizeCache], input_val);
-			PR_write(&timestamps[thread_pos], curr_clock);
+			PR_write(&ts_GPU[thread_pos], curr_clock);
 			// if (nbRetries == 8191) printf("thr%i aborted 8191 times for key%i thread_pos=%i rsetSize=%lu, wsetSize=%lu\n",
 			// 	id, input_key, thread_pos, pr_args.rset.size, pr_args.wset.size);
 			PR_txCommit();

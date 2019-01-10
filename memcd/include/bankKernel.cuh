@@ -62,7 +62,8 @@ typedef struct HeTM_memcdTx_input_ {
 	PR_GRANULE_T *extraKey;      /* 3*4B */
 	PR_GRANULE_T *val;           /* values in global memory */
 	PR_GRANULE_T *extraVal;      /* 7*4B */
-	PR_GRANULE_T *ts;            /* last access TS in global memory */
+	PR_GRANULE_T *ts_CPU;        /* last access TS in global memory */
+	PR_GRANULE_T *ts_GPU;        /* last access TS in global memory */
 	PR_GRANULE_T *state;         /* state in global memory */
 	PR_GRANULE_T *setUsage;      /* state in global memory */
   int nbSets;

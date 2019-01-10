@@ -115,7 +115,7 @@ static void offloadMemcdTxThread(void *argsPtr)
   // thread_data_t *cd = args->thread_data;
   cuda_t *d = args->d;
   account_t *a = args->a;
-  static thread_local unsigned seed = 8293126;
+  static thread_local unsigned seed = 82913126;
 
   cudaError_t cudaStatus;
 

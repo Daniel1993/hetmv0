@@ -21,9 +21,15 @@
 #define LOG_SIZE             32
 #define STM_LOG_BUFFER_SIZE  4 /* buffer capacity (times LOG_SIZE) */
 #else /* !HETM_VERS2_LOG */
-#define LOG_SIZE             32768 // 32768 // 65536 // 131072 /* Initial log size */
-#define STM_LOG_BUFFER_SIZE  4 /* buffer capacity (times LOG_SIZE) */
+#define LOG_SIZE             131072 // 32768 // 65536 // 131072 /* Initial log size */
+#define STM_LOG_BUFFER_SIZE  1 // 4 /* buffer capacity (times LOG_SIZE) */
 #endif /* HETM_VERS2_LOG */
+
+// BMAP only
+// #define DEFAULT_BITMAP_GRANULARITY_BITS (12) // 4kB --> then I use a smart copy
+// #define DEFAULT_BITMAP_GRANULARITY (0x1<<12)
+#define DEFAULT_BITMAP_GRANULARITY_BITS (14) // 16kB --> then I use a smart copy
+#define DEFAULT_BITMAP_GRANULARITY (0x1<<14)
 
 #ifndef HETM_LOG_TYPE
 #define HETM_LOG_TYPE HETM_VERS_LOG
@@ -52,10 +58,12 @@ typedef struct HeTM_CPULogEntry_t {
 extern __thread HETM_LOG_T *stm_thread_local_log;
 
 extern void *stm_devMemPoolBackupBmap;
+extern void *stm_devMemPoolBmap;
 extern void *stm_baseMemPool;
 extern void *stm_wsetCPU; // only for HETM_BMAP_LOG
 extern void *stm_wsetCPUCache; // only for HETM_BMAP_LOG
 extern size_t stm_wsetCPUCacheBits; // only for HETM_BMAP_LOG
+extern long *hetm_batchCount;
 
 /* ################################################################### *
  * inline FUNCTIONS
@@ -78,6 +86,9 @@ static inline HETM_LOG_T* stm_log_init()
   CHUNKED_LOG_INIT(res, sizeof(HeTM_CPULogEntry), LOG_SIZE);
   stm_thread_local_log = res;
 #endif /* HETM_LOG_TYPE */
+  // printf("new log=%p\n", res);
+  // COMPILER_FENCE(); // some error
+  __sync_synchronize();
   return res;
 };
 
@@ -129,16 +140,16 @@ static inline void stm_log_free(HETM_LOG_T *log)
 static inline int
 stm_log_newentry(HETM_LOG_T *log, long* volatile pos, int volatile val, long vers)
 {
-#if !defined(HETM_DISABLE_CHUNKS) && HETM_LOG_TYPE != HETM_VERS_LOG && HETM_LOG_TYPE != HETM_VERS2_LOG
-  memman_access_addr(stm_devMemPoolBackupBmap, pos);
+#if !defined(HETM_DISABLE_CHUNKS)
+  memman_access_addr(stm_devMemPoolBackupBmap, pos, 1);
 #endif /* HETM_DISABLE_CHUNKS */
 
 #if HETM_LOG_TYPE == HETM_BMAP_LOG
   /* ********************************************** */
   // set bitmap
   // TODO: 2 ==> PR_LOCK_GRAN_BITS
-  memman_access_addr_gran(stm_wsetCPU, stm_baseMemPool, pos, 1, 2);
-  memman_access_addr_gran(stm_wsetCPUCache, stm_baseMemPool, pos, 1, (2+stm_wsetCPUCacheBits));
+  memman_access_addr_gran(stm_wsetCPU, stm_baseMemPool, pos, 1, 2, *hetm_batchCount);
+  memman_access_addr_gran(stm_wsetCPUCache, stm_baseMemPool, pos, 1, (stm_wsetCPUCacheBits+2), *hetm_batchCount);
 
   /* ********************************************** */
 #else /* HETM_LOG_TYPE != HETM_BMAP_LOG */
@@ -161,12 +172,9 @@ stm_log_newentry(HETM_LOG_T *log, long* volatile pos, int volatile val, long ver
     .time_stamp = (uint32_t)vers,
     .val = (int32_t)val,
   };
-  // if (entry.pos > 8192) { /* don't forget the +1 */
-  //   printf("setUsageEntry %i val=%i\n", entry.pos-1, entry.val);
+  // if (entry.pos == 29) { /* don't forget the +1 */
+  //   printf("entry.pos =%i \n", entry.pos);
   // }
-  // entry.val        = val;
-  // entry.pos        = (pos_addr - base_addr) + 1; // just the offset, WARN: assumption on address space layout
-  // entry.time_stamp = (uint32_t)vers; // WARN: may wrap around very often
 #elif HETM_LOG_TYPE == HETM_ADDR_LOG
   volatile HeTM_CPULogEntry entry;
   entry.pos = (int*)pos;
@@ -177,7 +185,6 @@ stm_log_newentry(HETM_LOG_T *log, long* volatile pos, int volatile val, long ver
   uintptr_t wordAddr = ((uintptr_t)pos) / sizeof(int);
   MOD_CHUNKED_LOG_APPEND(log, (void*)&entry, wordAddr);
 #else /* HETM_VERS_LOG */
-// 0 size logs
   CHUNKED_LOG_APPEND(log, (void*)&entry);
 #endif /* HETM_LOG_TYPE == HETM_VERS2_LOG */
 

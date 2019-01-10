@@ -1,7 +1,9 @@
-#define _GNU_SOURCE
+#define _GNU_SOURCE // redefined
 #include "shared.h"
 #include "bank.h"
 #include <sched.h>
+
+#include "input_handler.h"
 
 // GLOBALS
 long long int global_fix;
@@ -209,6 +211,24 @@ void bank_parseArgs(int argc, char **argv, thread_data_t *data)
       default:
         exit(1);
     }
+  }
+
+  // TODO: extra parameters are fetched with input_handler
+	input_parse(argc, argv); // parses input in the format <key>=<val>
+
+  data->CPU_backoff = 100;
+  if (input_exists("CPU_BACKOFF")) {
+    data->CPU_backoff = input_getLong("CPU_BACKOFF");
+  }
+
+  data->CPU_steal_prob = 0;
+  if (input_exists("CPU_STEAL_PROB")) {
+    data->CPU_steal_prob = input_getDouble("CPU_STEAL_PROB");
+  }
+
+  data->GPU_steal_prob = 0;
+  if (input_exists("GPU_STEAL_PROB")) {
+    data->GPU_steal_prob = input_getDouble("GPU_STEAL_PROB");
   }
 }
 
@@ -466,7 +486,7 @@ void bank_between_iter(thread_data_t *data, int j)
   data->tot_trf2cpu[j]        = data->dthreads[data->nb_threadsCPU].nb_aborts_validate_read;
   data->tot_trf2gpu[j]        = data->dthreads[data->nb_threadsCPU].nb_aborts_validate_write;
   data->tot_trfcmp[j]         = data->dthreads[data->nb_threadsCPU].nb_aborts_validate_commit;
-  data->tot_commits[j]        = data->reads + data->writes + data->updates;
+  data->tot_commits[j]        = HeTM_stats_data.nbCommittedTxsCPU;
   data->tot_duration[j]       = data->duration;
   data->tot_duration2[j]      = data->duration2;
   data->tot_throughput[j]     = data->throughput;
@@ -506,6 +526,8 @@ void bank_check_params(thread_data_t *data)
   printf("CM             : %s\n", (data->cm == NULL ? "DEFAULT" : data->cm));
 #endif /* ! TM_COMPILER */
   printf("Duration       : %f\n", data->duration);
+  printf("CPU_steal      : %f\n", data->CPU_steal_prob);
+  printf("GPU_steal      : %f\n", data->GPU_steal_prob);
   printf("Iterations     : %d\n", data->iter);
   printf("Nb threads     : %d\n", data->nb_threads);
   printf("Read-all rate  : %d\n", data->read_all);
