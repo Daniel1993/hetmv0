@@ -26,8 +26,8 @@
 #endif /* HETM_VERS2_LOG */
 
 // BMAP only
-#define DEFAULT_BITMAP_GRANULARITY_BITS (10) // 1kB --> then I use a smart copy
-#define DEFAULT_BITMAP_GRANULARITY (0x1<<10)
+#define DEFAULT_BITMAP_GRANULARITY_BITS (8) // 1kB --> then I use a smart copy
+#define DEFAULT_BITMAP_GRANULARITY (0x1<<8)
 // #define DEFAULT_BITMAP_GRANULARITY_BITS (12) // 4kB --> then I use a smart copy
 // #define DEFAULT_BITMAP_GRANULARITY (0x1<<12)
 // #define DEFAULT_BITMAP_GRANULARITY_BITS (14) // 16kB --> then I use a smart copy
