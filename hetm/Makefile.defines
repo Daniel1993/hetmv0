@@ -5,6 +5,7 @@ LOG_TYPE          ?= VERS
 PROFILE           ?= 0
 OLD_BMAP_IMPL     ?= 0
 USE_UNIF_MEM      ?= 0
+DISABLE_NON_BLOCKING ?= 0
 
 SYS_CPU_MAX_FREQ=$(shell cat /sys/devices/system/cpu/cpu0/cpufreq/cpuinfo_max_freq)
 SYS_CPU_NB_CORES=$(shell cat /proc/cpuinfo | grep processor | wc -l)

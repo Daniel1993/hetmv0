@@ -530,15 +530,15 @@ void memcdReadTx(PR_globalKernelArgs)
 
 		// int target_set = input_key % nbSets;
 		// int thread_pos = target_set*nbWays + wayId;
-#if BANK_PART == 1 /* use MOD 3 */
-		int mod_key = input_key % nbSets;
-		int target_set = (mod_key / 3 + (mod_key % 3) * (nbSets / 3)) % nbSets;
-#else /* use MOD 2 */
-		int mod_key = input_key % nbSets;
-		int target_set = (mod_key / 2 + (mod_key % 2) * (nbSets / 2)) % nbSets;
-#endif
-		// int mod_key = input_key % nbSets;
-		// int target_set = mod_key; // / 3 + (mod_key % 3) * (nbSets / 3);
+// #if BANK_PART == 1 /* use MOD 3 */
+// 		int mod_key = input_key % nbSets;
+// 		int target_set = (mod_key / 3 + (mod_key % 3) * (nbSets / 3)) % nbSets;
+// #else /* use MOD 2 */
+// 		int mod_key = input_key % nbSets;
+// 		int target_set = (mod_key / 2 + (mod_key % 2) * (nbSets / 2)) % nbSets;
+// #endif
+		int mod_key = (input_key>>4) % nbSets;
+		int target_set = mod_key; // / 3 + (mod_key % 3) * (nbSets / 3);
 
 		int thread_pos = target_set*nbWays + wayId;
 
@@ -729,13 +729,15 @@ __global__ void memcdWriteTx(PR_globalKernelArgs)
 		// int target_set = input_key % nbSets;
 		// int thread_pos = target_set*nbWays + wayId;
 
-#if BANK_PART == 1 /* use MOD 3 */
-		int mod_key = input_key % nbSets;
-		int target_set = (mod_key / 3 + (mod_key % 3) * (nbSets / 3)) % nbSets;
-#else /* use MOD 2 */
-		int mod_key = input_key % nbSets;
+// #if BANK_PART == 1 /* use MOD 3 */
+// 		int mod_key = input_key % nbSets;
+// 		int target_set = (mod_key / 3 + (mod_key % 3) * (nbSets / 3)) % nbSets;
+// #else /* use MOD 2 */
+// 		int mod_key = input_key % nbSets;
+// 		int target_set = (mod_key / 2 + (mod_key % 2) * (nbSets / 2)) % nbSets;
+// #endif
+		int mod_key = (input_key>>4) % nbSets;
 		int target_set = (mod_key / 2 + (mod_key % 2) * (nbSets / 2)) % nbSets;
-#endif
 
 		int thread_pos = target_set*nbWays + wayId;
 

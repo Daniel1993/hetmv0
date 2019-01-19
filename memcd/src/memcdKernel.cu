@@ -14,6 +14,8 @@ typedef struct offload_bank_tx_thread_ {
 static void offloadMemcdTxThread(void *argsPtr);
 static void offloadEmptyTxThread(void *argsPtr);
 
+extern int nbOfGPUSetKernels;
+
 void call_cuda_check_memcd(PR_GRANULE_T* gpuMempool, size_t size)
 {
   memcd_check<<<32,4>>>(gpuMempool, size);
@@ -144,6 +146,7 @@ static void offloadMemcdTxThread(void *argsPtr)
 	} else {
 		//MEMCACHED SET
     knlman_select("HeTM_memcdWriteTx");
+    nbOfGPUSetKernels++;
 		// d->run_size = d->blockNumG*d->threadNum;
 		// read_size = d->blockNumG*d->threadNum;
 	}

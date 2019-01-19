@@ -32,6 +32,7 @@ thread_local static int doneWithLog = 0;
 static int launchCmpKernel(HeTM_thread_s*, size_t wsetSize);
 static void checkCmpDone();
 static void cmpBlockApply();
+static void wakeUpGPU();
 static void cpyWSetToGPU();
 static void asyncCpy(void *argsPtr);
 static void asyncCmp(void *argsPtr);
@@ -64,12 +65,8 @@ void HeTM_cpu_thread()
   } else {
     while (CONTINUE_COND) {
 #if HETM_LOG_TYPE != HETM_BMAP_LOG
-  #ifdef DISABLE_NON_BLOCKING
-      cmpBlockApply(); // Block immediately
-  #else /* VERS_DISABLE_NON_BLOCKING */
       checkCmpDone(); // Tests if ready
       cpyWSetToGPU();
-  #endif /* VERS_DISABLE_NON_BLOCKING */
 #else /* HETM_LOG_TYPE == HETM_BMAP_LOG */
       if (HeTM_get_GPU_status() == HETM_BATCH_DONE) {
         NVTX_PUSH_RANGE("blocked", NVTX_PROF_BLOCK);
@@ -221,6 +218,17 @@ static void cpyWSetToGPU()
   if (HeTM_get_GPU_status() != HETM_BATCH_DONE
     && HeTM_get_GPU_status() != HETM_GPU_IDLE) return;
 
+#ifdef DISABLE_NON_BLOCKING
+  if (HeTM_get_GPU_status() != HETM_IS_EXIT) {
+    TIMER_READ(HeTM_thread_data->backoffBegTimer);
+    __sync_add_and_fetch(&HeTM_shared_data.threadsWaitingSync, 1);
+    cmpBlockApply();
+    wakeUpGPU(); // already decreases HeTM_shared_data.threadsWaitingSync
+    return;
+  }
+  // doneWithLog=1;
+#endif /* !DISABLE_NON_BLOCKING */
+
   if (HeTM_get_GPU_status() == HETM_GPU_IDLE) {
     // The GPU is IDLE, lets push some writes into the GPU right away
     // continue in case there isn't enough log
@@ -281,12 +289,14 @@ static void cpyWSetToGPU()
   }
 
   __sync_synchronize();
+
 	if (HeTM_shared_data.threadsWaitingSync == HeTM_shared_data.nbCPUThreads && doneWithLog) {
     // can only enter here if no cpy or cmp is running
 		/* stop sending comparison kernels to the GPU */
     cmpBlockApply();
     // HeTM_sync_barrier(); // /* Wake up GPU controller thread */
     // HeTM_sync_barrier(); // /* wait to set the cuda_stop flag to 0 */
+    wakeUpGPU();
 	} else if (HeTM_thread_data->nbCmpLaunches <= nbCpyRounds) {
     // --------------------------------------
     // continue running the CPU
@@ -412,7 +422,10 @@ static void cmpBlockApply()
       i++;
     } /* while not empty */
   }  /* no inter-conflict */
+}
 
+static void wakeUpGPU()
+{
   HeTM_sync_barrier(); // /* Wake up GPU controller thread */
   HeTM_sync_barrier(); // /* wait to set the cuda_stop flag to 0 */
   // printf("[%i] <<<<<<<<< NEW ROUND >>>>>>>>>>>>\n", HeTM_thread_data->id);

@@ -86,6 +86,8 @@ MEMCD_OBJS  := \
 	$(SHARED)/src/shared.o \
 	$(SRC)/setupKernels.o \
 	$(SRC)/memcdKernel.o \
+	$(SRC)/zipf_dist.o \
+	$(SRC)/input_buffer.o \
 	$(SRC)/kernel.o
 
 OBJS := $(MEMCD_OBJS)
@@ -127,6 +129,7 @@ $(APP): $(OBJS)
 		PR_MAX_RWSET_SIZE=$(PR_MAX_RWSET_SIZE) \
 		CFG=$(CFG) \
 		HETM_DISABLE_CHUNKS=$(DHETM_DISABLE_CHUNKS) \
+		DISABLE_NON_BLOCKING=$(DISABLE_NON_BLOCKING) \
 		INST_CPU=$(INST_CPU) \
 		PRINT_DEB=$(PRINT_DEB)
 	@echo " ============================================ "
@@ -156,6 +159,7 @@ $(APP): $(OBJS)
 		PROFILE=$(PROFILE) \
 		INST_CPU=$(INST_CPU) \
 		USE_UNIF_MEM=$(USE_UNIF_MEM) \
+		DISABLE_NON_BLOCKING=$(DISABLE_NON_BLOCKING) \
 		HETM_DISABLE_CHUNKS=$(DHETM_DISABLE_CHUNKS) \
 		PRINT_DEB=$(PRINT_DEB)
 	@echo "Linking..."

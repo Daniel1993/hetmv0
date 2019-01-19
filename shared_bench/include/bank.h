@@ -257,6 +257,10 @@ struct thread_data {
 	int shared_percent;
 	int num_ways;
 
+	int NB_CONFL_GPU_BUFFER;
+	int NB_CONFL_CPU_BUFFER;
+	long CONFL_SPACE;
+
 	struct thread_data *dthreads;
 
   char padding[64];

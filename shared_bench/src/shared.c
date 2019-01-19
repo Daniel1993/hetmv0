@@ -230,6 +230,21 @@ void bank_parseArgs(int argc, char **argv, thread_data_t *data)
   if (input_exists("GPU_STEAL_PROB")) {
     data->GPU_steal_prob = input_getDouble("GPU_STEAL_PROB");
   }
+
+  data->NB_CONFL_GPU_BUFFER = 10;
+  if (input_exists("NB_CONFL_GPU_BUFFER")) {
+    data->NB_CONFL_GPU_BUFFER = input_getLong("NB_CONFL_GPU_BUFFER");
+  }
+
+  data->NB_CONFL_CPU_BUFFER = 1;
+  if (input_exists("NB_CONFL_CPU_BUFFER")) {
+    data->NB_CONFL_CPU_BUFFER = input_getLong("NB_CONFL_CPU_BUFFER");
+  }
+
+  data->CONFL_SPACE = 10000;
+  if (input_exists("CONFL_SPACE")) {
+    data->CONFL_SPACE = input_getLong("CONFL_SPACE");
+  }
 }
 
 void bank_printStats(thread_data_t *data)

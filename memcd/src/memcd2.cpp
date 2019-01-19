@@ -12,6 +12,8 @@
 #include "CheckAllFlags.h"
 #include "zipf_dist.hpp"
 
+#include "memcd.h"
+
 /* ################################################################### *
 * GLOBALS
 * ################################################################### */
@@ -20,18 +22,17 @@
 static std::mt19937 generator;
 // static zipf_distribution<int, double> *zipf_dist = NULL;
 
-// global
-thread_data_t parsedData;
-int isInterBatch = 0;
-size_t accountsSize;
-size_t sizePool;
-void* gpuMempool;
-
 static int probStealBatch = 0;
 static int isCPUBatchSteal = 0;
 static int isGPUBatchSteal = 0;
 
 static unsigned memcached_global_clock = 0;
+
+int nbOfGPUSetKernels = 0; // called extern in memcdKernel.cu
+int *GPUoutputBuffer; // called extern in input_buffer.c
+int *CPUoutputBuffer;
+int *GPUInputBuffer;
+int *CPUInputBuffer;
 
 #ifndef REQUEST_LATENCY
 #define REQUEST_LATENCY 10.0
@@ -53,8 +54,6 @@ static unsigned memcached_global_clock = 0;
 
 // -----------------------------------------------------------------------------
 
-const static int NB_OF_GPU_BUFFERS = 4; // GPU receives some more space
-const static int NB_CPU_TXS_PER_THREAD = 8192;
 static int NB_GPU_TXS; // must be loaded at run time
 
 enum NAME_QUEUE {
@@ -65,19 +64,10 @@ enum NAME_QUEUE {
 
 static volatile long *startInputPtr, *endInputPtr;
 
-int *GPUoutputBuffer, *CPUoutputBuffer;
-int *GPUInputBuffer, *CPUInputBuffer;
-
 static unsigned long long input_seed = 0x3F12514A3F12514A;
 
 // CPU output --> must fill the buffer until the log ends (just realloc on full)
-static size_t currMaxCPUoutputBufferSize, currCPUoutputBufferPtr = 0;
-static size_t maxGPUoutputBufferSize;
-static size_t size_of_GPU_input_buffer, size_of_CPU_input_buffer;
-static int lockOutputBuffer = 0;
 
-FILE *GPU_input_file = NULL;
-FILE *CPU_input_file = NULL;
 
 // TODO: break the dataset
 // static cudaStream_t *streams;
@@ -90,147 +80,35 @@ FILE *CPU_input_file = NULL;
 
 static int fill_GPU_input_buffers()
 {
-	int buffer_last = size_of_GPU_input_buffer/4/sizeof(int);
-	GPU_input_file = fopen(parsedData.GPUInputFile, "r");
-
-	// if (zipf_dist == NULL) {
-	// 	generator.seed(input_seed);
-	// 	zipf_dist = new zipf_distribution<int, double>(parsedData.nb_accounts * parsedData.num_ways);
-	// }
-
-	memman_select("GPU_input_buffer_good1");
-	int *cpu_ptr = (int*)memman_get_cpu(NULL);
-
 #if BANK_PART == 1 /* shared queue is %3 == 2 */
-	// unsigned rnd = 12345723; //RAND_R_FNC(input_seed);
-	unsigned rnd; // = (*zipf_dist)(generator);
-	for (int i = 0; i < buffer_last; ++i) {
-		if (fscanf(GPU_input_file, "%i\n", &rnd) == EOF) {
-			printf("ERROR GPU reached end-of-file at %i / %i\n", i, buffer_last);
-		}
-		int mod = rnd % 3;
-		cpu_ptr[i] = (rnd - mod) + 2; // gives always 2 (mod 3) //2*i;//
-	}
-
-	memman_select("GPU_input_buffer_good2");
-	cpu_ptr = (int*)memman_get_cpu(NULL);
-	for (int i = 0; i < buffer_last; ++i) {
-		if (fscanf(GPU_input_file, "%i\n", &rnd) == EOF) {
-			printf("ERROR GPU reached end-of-file at %i / %i\n", i, buffer_last);
-		}
-		int mod = rnd % 3;
-		cpu_ptr[i] = (rnd - mod) + 2; // gives always 2 (mod 3) //2*i;//
-	}
-
-	memman_select("GPU_input_buffer_bad1");
-	cpu_ptr = (int*)memman_get_cpu(NULL);
-	for (int i = 0; i < buffer_last; ++i) {
-		if (fscanf(GPU_input_file, "%i\n", &rnd) == EOF) {
-			printf("ERROR GPU reached end-of-file at %i / %i\n", i, buffer_last);
-		}
-		int mod = rnd % 3;
-		cpu_ptr[i] = (rnd - mod) + 1; // gives always 0 (mod 3) //2*i+1;//
-	}
-
-	memman_select("GPU_input_buffer_bad2");
-	cpu_ptr = (int*)memman_get_cpu(NULL);
-	for (int i = 0; i < buffer_last; ++i) {
-		if (fscanf(GPU_input_file, "%i\n", &rnd) == EOF) {
-			printf("ERROR GPU reached end-of-file at %i / %i\n", i, buffer_last);
-		}
-		int mod = rnd % 3;
-		cpu_ptr[i] = (rnd - mod) + 2; // gives always 2 (mod 3) //2*i+1;//
-	}
-
-#else /* BANK_PART == 2 shared queue is the other device */
-	unsigned rnd; // = (*zipf_dist)(generator);
-	for (int i = 0; i < buffer_last; ++i) {
-		if (fscanf(GPU_input_file, "%i\n", &rnd) == EOF) {
-			printf("ERROR GPU reached end-of-file at %i / %i\n", i, buffer_last);
-		}
-		int mod = rnd % 2;
-		cpu_ptr[i] = (rnd - mod);//2*i;//
-	}
-
-	memman_select("GPU_input_buffer_good2");
-	cpu_ptr = (int*)memman_get_cpu(NULL);
-	for (int i = 0; i < buffer_last; ++i) {
-		if (fscanf(GPU_input_file, "%i\n", &rnd) == EOF) {
-			printf("ERROR GPU reached end-of-file at %i / %i\n", i, buffer_last);
-		}
-		int mod = rnd % 2;
-		cpu_ptr[i] = (rnd - mod);//2*i;//
-	}
-
-	memman_select("GPU_input_buffer_bad1");
-	cpu_ptr = (int*)memman_get_cpu(NULL);
-
-	for (int i = 0; i < buffer_last; ++i) {
-		if (fscanf(GPU_input_file, "%i\n", &rnd) == EOF) {
-			printf("ERROR GPU reached end-of-file at %i / %i\n", i, buffer_last);
-		}
-		int mod = rnd % 2;
-		cpu_ptr[i] = (rnd - mod) + 1; // gets input from the CPU //2*i+1;//
-	}
-
-	memman_select("GPU_input_buffer_bad2");
-	cpu_ptr = (int*)memman_get_cpu(NULL);
-
-	for (int i = 0; i < buffer_last; ++i) {
-		if (fscanf(GPU_input_file, "%i\n", &rnd) == EOF) {
-			printf("ERROR GPU reached end-of-file at %i / %i\n", i, buffer_last);
-		}
-		int mod = rnd % 2;
-		cpu_ptr[i] = (rnd - mod) + 1; // gets input from the CPU //2*i+1;//
-	}
+	GPUbufferReadFromFile_NO_CONFLS();
+#elif BANK_PART == 2 /* shared queue is the other device */
+	GPUbufferReadFromFile_CONFLS();
+#elif BANK_PART == 3 /* unif rand */
+	GPUbufferReadFromFile_UNIF_RAND();
+#elif BANK_PART == 4
+	GPUbuffer_NO_CONFLS();
+#elif BANK_PART == 5
+	GPUbuffer_UNIF_2();
+#elif BANK_PART == 6
+	GPUbuffer_ZIPF_2();
 #endif
 }
 
 static int fill_CPU_input_buffers()
 {
-	int good_buffers_last = size_of_CPU_input_buffer/sizeof(int);
-	int bad_buffers_last = 2*size_of_CPU_input_buffer/sizeof(int);
-	CPU_input_file = fopen(parsedData.CPUInputFile, "r");
-
-	// if (zipf_dist == NULL) {
-	// 	generator.seed(input_seed);
-	// 	zipf_dist = new zipf_distribution<int, double>(parsedData.nb_accounts * parsedData.num_ways);
-	// }
-
-#if BANK_PART == 1
-	for (int i = 0; i < good_buffers_last; ++i) {
-		unsigned rnd;
-		if (fscanf(CPU_input_file, "%i\n", &rnd) == EOF) {
-			printf("ERROR CPU reached end-of-file at %i / %i\n", i, good_buffers_last);
-		}
-		int mod = rnd % 3;
-		CPUInputBuffer[i] = (rnd - mod); // 2*i+1;//
-	}
-	for (int i = good_buffers_last; i < bad_buffers_last; ++i) {
-		unsigned rnd;
-		if (fscanf(CPU_input_file, "%i\n", &rnd) == EOF) {
-			printf("ERROR CPU reached end-of-file at %i / %i\n", i, bad_buffers_last);
-		}
-		int mod = rnd % 3;
-		CPUInputBuffer[i] = (rnd - mod) + 1; //2*i;//
-	}
-#else /* BANK_PART == 2 shared queue is the other device */
-	for (int i = 0; i < good_buffers_last; ++i) {
-		unsigned rnd;
-		if (fscanf(CPU_input_file, "%i\n", &rnd) == EOF) {
-			printf("ERROR CPU reached end-of-file at %i / %i\n", i, good_buffers_last);
-		}
-		int mod = rnd % 2;
-		CPUInputBuffer[i] = (rnd - mod) + 1; //2*i+1;//
-	}
-	for (int i = good_buffers_last; i < bad_buffers_last; ++i) {
-		unsigned rnd;
-		if (fscanf(CPU_input_file, "%i\n", &rnd) == EOF) {
-			printf("ERROR CPU reached end-of-file at %i / %i\n", i, bad_buffers_last);
-		}
-		int mod = rnd % 2;
-		CPUInputBuffer[i] = (rnd - mod); // gets input from the GPU //2*i;//
-	}
+#if BANK_PART == 1 /* shared queue is %3 == 1 */
+	CPUbufferReadFromFile_NO_CONFLS();
+#elif BANK_PART == 2 /* shared queue is the other device */
+	CPUbufferReadFromFile_CONFLS();
+#elif BANK_PART == 3 /* unif rand */
+	CPUbufferReadFromFile_UNIF_RAND();
+#elif BANK_PART == 4
+	CPUbuffer_NO_CONFLS();
+#elif BANK_PART == 5
+	CPUbuffer_UNIF_2();
+#elif BANK_PART == 6
+	CPUbuffer_ZIPF_2();
 #endif
 }
 
@@ -276,7 +154,7 @@ memcd_get_output_t cpu_GET_kernel(memcd_t *memcd, int *input_key, unsigned input
 	int sizeCache = memcd->nbSets*memcd->nbWays;
 
 	// 1) hash key
-	modHash = key % memcd->nbSets;
+	modHash = (key>>4) % memcd->nbSets;
 	// TODO: this would be nice, but we lose control of where the key goes to
 	// memset(key, 0, size_of_hash);
 	// memcpy(key, input_key, sizeof(int));
@@ -284,12 +162,12 @@ memcd_get_output_t cpu_GET_kernel(memcd_t *memcd, int *input_key, unsigned input
 	// modHash = hash[0];
 	// modHash += hash[1];
 
-#if BANK_PART == 1 /* use MOD 3 */
-	setIdx = (modHash / 3 + (modHash % 3) * (memcd->nbSets / 3)) % memcd->nbSets;
-#else /* use MOD 2 */
-	setIdx = (modHash / 2 + (modHash % 2) * (memcd->nbSets / 2)) % memcd->nbSets;
-#endif
-	// setIdx = modHash;
+// #if BANK_PART == 1 /* use MOD 3 */
+// 	setIdx = (modHash / 3 + (modHash % 3) * (memcd->nbSets / 3)) % memcd->nbSets;
+// #else /* use MOD 2 */
+// 	setIdx = (modHash / 2 + (modHash % 2) * (memcd->nbSets / 2)) % memcd->nbSets;
+// #endif
+	setIdx = modHash;
 
 	// 2) setIdx <- hash % nbSets
 	setIdx = setIdx * memcd->nbWays;
@@ -363,7 +241,7 @@ void cpu_SET_kernel(memcd_t *memcd, int *input_key, int *input_value, unsigned i
 	int sizeCache = memcd->nbSets*memcd->nbWays;
 
 	// 1) hash key
-	modHash = key % memcd->nbSets;
+	modHash = (key>>4) % memcd->nbSets;
 	// TODO: this would be nice, but we lose control of where the key goes to
 	// memset(key, 0, size_of_hash);
 	// memcpy(key, input_key, sizeof(int));
@@ -371,11 +249,12 @@ void cpu_SET_kernel(memcd_t *memcd, int *input_key, int *input_value, unsigned i
 	// modHash = hash[0];
 	// modHash += hash[1];
 
-#if BANK_PART == 1 /* use MOD 3 */
-	setIdx = modHash / 3 + (modHash % 3) * (memcd->nbSets / 3);
-#else /* use MOD 2 */
-	setIdx = modHash / 2 + (modHash % 2) * (memcd->nbSets / 2);
-#endif
+// #if BANK_PART == 1 /* use MOD 3 */
+// 	setIdx = modHash / 3 + (modHash % 3) * (memcd->nbSets / 3);
+// #else /* use MOD 2 */
+// 	setIdx = modHash / 2 + (modHash % 2) * (memcd->nbSets / 2);
+// #endif
+	setIdx = modHash;
 
 	// 2) setIdx <- hash % nbSets
 	int mod_set = setIdx;
@@ -506,14 +385,14 @@ void cpu_SET_kernel_NOTX(memcd_t *memcd, int *input_key, int *input_value, unsig
 	int sizeCache = memcd->nbSets*memcd->nbWays;
 
 	// 1) hash key
-	modHash = key % memcd->nbSets;
+	modHash = (key>>4) % memcd->nbSets;
 
-#if BANK_PART == 1 /* use MOD 3 */
-	setIdx = modHash / 3 + (modHash % 3) * (memcd->nbSets / 3);
-#else /* use MOD 2 */
-	setIdx = modHash / 2 + (modHash % 2) * (memcd->nbSets / 2);
-#endif
-	// setIdx = modHash;
+// #if BANK_PART == 1 /* use MOD 3 */
+// 	setIdx = modHash / 3 + (modHash % 3) * (memcd->nbSets / 3);
+// #else /* use MOD 2 */
+// 	setIdx = modHash / 2 + (modHash % 2) * (memcd->nbSets / 2);
+// #endif
+	setIdx = modHash;
 
 	// 2) setIdx <- hash % nbSets
 	int mod_set = setIdx;
@@ -916,7 +795,8 @@ int main(int argc, char **argv)
 	currMaxCPUoutputBufferSize = maxGPUoutputBufferSize; // realloc on full
 
 	// malloc_or_die(GPUoutputBuffer, maxGPUoutputBufferSize);
-	memman_alloc_dual("GPU_output_buffer", maxGPUoutputBufferSize*sizeof(memcd_get_output_t), 0);
+	int sizeOfFlag_TXDone = maxGPUoutputBufferSize; // 1 Byte per GPU TX
+	memman_alloc_dual("GPU_output_buffer", maxGPUoutputBufferSize*sizeof(memcd_get_output_t) + sizeOfFlag_TXDone, 0);
 	GPUoutputBuffer = (int*)memman_get_gpu(NULL);
 
 	size_of_GPU_input_buffer = NB_OF_GPU_BUFFERS*maxGPUoutputBufferSize*sizeof(int);
@@ -1046,16 +926,8 @@ int main(int argc, char **argv)
   printf("Initializing STM\n");
 
 	/* POPULATE the cache */
-	for (int i = 0; i < (size_of_CPU_input_buffer * 2)/sizeof(int); ++i) {
-		cpu_SET_kernel_NOTX(memcd, &CPUInputBuffer[i], &CPUInputBuffer[i], 0);
-	}
 	memman_select("GPU_input_buffer_good1");
 	int *gpu_buffer_cpu_ptr = (int*)memman_get_cpu(NULL);
-	for (int i = 0; i < size_of_GPU_input_buffer/4/sizeof(int); ++i) {
-		cpu_SET_kernel_NOTX(memcd, &gpu_buffer_cpu_ptr[i], &gpu_buffer_cpu_ptr[i], 0);
-	}
-	memman_select("GPU_input_buffer_good2");
-	gpu_buffer_cpu_ptr = (int*)memman_get_cpu(NULL);
 	for (int i = 0; i < size_of_GPU_input_buffer/4/sizeof(int); ++i) {
 		cpu_SET_kernel_NOTX(memcd, &gpu_buffer_cpu_ptr[i], &gpu_buffer_cpu_ptr[i], 0);
 	}
@@ -1064,10 +936,18 @@ int main(int argc, char **argv)
 	for (int i = 0; i < size_of_GPU_input_buffer/4/sizeof(int); ++i) {
 		cpu_SET_kernel_NOTX(memcd, &gpu_buffer_cpu_ptr[i], &gpu_buffer_cpu_ptr[i], 0);
 	}
+	memman_select("GPU_input_buffer_good2");
+	gpu_buffer_cpu_ptr = (int*)memman_get_cpu(NULL);
+	for (int i = 0; i < size_of_GPU_input_buffer/4/sizeof(int); ++i) {
+		cpu_SET_kernel_NOTX(memcd, &gpu_buffer_cpu_ptr[i], &gpu_buffer_cpu_ptr[i], 0);
+	}
 	memman_select("GPU_input_buffer_bad2");
 	gpu_buffer_cpu_ptr = (int*)memman_get_cpu(NULL);
 	for (int i = 0; i < size_of_GPU_input_buffer/4/sizeof(int); ++i) {
 		cpu_SET_kernel_NOTX(memcd, &gpu_buffer_cpu_ptr[i], &gpu_buffer_cpu_ptr[i], 0);
+	}
+	for (int i = 0; i < (size_of_CPU_input_buffer * 2)/sizeof(int); ++i) {
+		cpu_SET_kernel_NOTX(memcd, &CPUInputBuffer[i], &CPUInputBuffer[i], 0);
 	}
 
 	// for (int i = 0; i < 32*4; ++i) {
@@ -1176,6 +1056,7 @@ int main(int argc, char **argv)
 	printf("CPU_start=%9li CPU_end=%9li\n", startInputPtr[CPU_QUEUE], endInputPtr[CPU_QUEUE]);
 	printf("GPU_start=%9li GPU_end=%9li\n", startInputPtr[GPU_QUEUE], endInputPtr[GPU_QUEUE]);
 	printf("SHARED_start=%9li SHARED_end=%9li\n", startInputPtr[SHARED_QUEUE], endInputPtr[SHARED_QUEUE]);
+	printf("nbOfGPUSetKernels=%i\n", nbOfGPUSetKernels);
 
   return EXIT_SUCCESS;
 }

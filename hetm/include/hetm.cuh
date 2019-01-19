@@ -179,13 +179,13 @@ extern void *HeTM_memStream;
 
 #ifdef HETM_OLD_BMAP_IMPL
 // Use a cache with 1 value written/not-written
-const int CACHE_GRANULE_SIZE = 2147483648; // 2GB
-const int CACHE_GRANULE_BITS = 31;
+const static int CACHE_GRANULE_SIZE = 2147483648; // 2GB
+const static int CACHE_GRANULE_BITS = 31;
 #else /* new one */
 // const int CACHE_GRANULE_SIZE = 4096;
 // const int CACHE_GRANULE_BITS = 12;
-const int CACHE_GRANULE_SIZE = DEFAULT_BITMAP_GRANULARITY;// 16384;
-const int CACHE_GRANULE_BITS = DEFAULT_BITMAP_GRANULARITY_BITS;// 14;
+const static int CACHE_GRANULE_SIZE = DEFAULT_BITMAP_GRANULARITY;// 16384;
+const static int CACHE_GRANULE_BITS = DEFAULT_BITMAP_GRANULARITY_BITS;// 14;
 #endif /* HETM_OLD_BMAP_IMPL */
 
 #ifdef __cplusplus
