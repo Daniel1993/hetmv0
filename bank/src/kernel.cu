@@ -196,7 +196,7 @@ void jobWithCuda_getStats(cuda_t *d, long *ab, long *com) {
   while(err) {
     err = 0;
 
-    CHECK_ERROR_CONTINUE(cudaThreadSynchronize());
+    CHECK_ERROR_CONTINUE(cudaDeviceSynchronize());
     HeTM_bankTx_cpy_IO();
 
     //Transfer aborts

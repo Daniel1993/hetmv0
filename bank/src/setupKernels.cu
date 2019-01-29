@@ -110,7 +110,7 @@ static void run_bankTx(knlman_callback_params_s params)
   input    = (HeTM_bankTx_input_s*)memman_get_cpu(NULL);
   inputDev = (HeTM_bankTx_input_s*)memman_get_gpu(NULL);
 
-  // CUDA_CHECK_ERROR(cudaThreadSynchronize(), ""); // sync the previous run
+  // CUDA_CHECK_ERROR(cudaDeviceSynchronize(), ""); // sync the previous run
 
   cudaFuncSetCacheConfig(bankTx, cudaFuncCachePreferL1);
 
@@ -152,7 +152,7 @@ static void run_memcdReadTx(knlman_callback_params_s params)
 
   // thread_local static unsigned short seed = 1234;
 
-  CUDA_CHECK_ERROR(cudaThreadSynchronize(), ""); // sync the previous run
+  CUDA_CHECK_ERROR(cudaDeviceSynchronize(), ""); // sync the previous run
 
   // memman_ad_hoc_free(NULL); // empties the previous parameters
   cudaFuncSetCacheConfig(memcdReadTx, cudaFuncCachePreferL1);
@@ -223,9 +223,8 @@ static void run_memcdWriteTx(knlman_callback_params_s params)
 
   input->key   = d->dev_a;
   input->val   = input->key + (d->memcd_array_size/4)/sizeof(PR_GRANULE_T);
-  input->ts_CPU = input->val + (d->memcd_array_size/4)/sizeof(PR_GRANULE_T);
-  input->ts_GPU = input->ts_CPU + (d->memcd_array_size/4)/sizeof(PR_GRANULE_T);
-  input->state = input->ts_GPU  + (d->memcd_array_size/4)/sizeof(PR_GRANULE_T);
+  input->ts    = input->val + (d->memcd_array_size/4)/sizeof(PR_GRANULE_T);
+  input->state = input->ts  + (d->memcd_array_size/4)/sizeof(PR_GRANULE_T);
   input->nbSets = d->num_sets;
   input->nbWays = d->num_ways;
   input->input_keys = GPUInputBuffer;

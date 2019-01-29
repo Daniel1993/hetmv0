@@ -35,6 +35,9 @@ __global__ void HeTM_knl_checkTxBitmapCache(HeTM_knl_cmp_args_s args)
 
   // unsigned char *rset = (unsigned char*)HeTM_knl_global.devRSet;
   unsigned char *rset = (unsigned char*)HeTM_knl_global.hostWSetCacheConfl;
+  unsigned char *rwsetConfl = (unsigned char*)HeTM_knl_global.hostWSetCacheConfl2;
+  unsigned char *unionWS = (unsigned char*)HeTM_knl_global.hostWSetCacheConfl3;
+  unsigned char *GPUwset = (unsigned char*)HeTM_knl_global.GPUwsBmap;
   unsigned char *wset = (unsigned char*)HeTM_knl_global.hostWSetCache;
 
   // int cacheId = id >> wsetBits;
@@ -50,9 +53,12 @@ __global__ void HeTM_knl_checkTxBitmapCache(HeTM_knl_cmp_args_s args)
     bytes[id] = 1; /*args.batchCount*/
   }
   int isConfl = (rset[id] == args.batchCount) && isNewWrite;
-
+  int isConflW = (GPUwset[id] && isNewWrite) ? 1 : 0;
+  unionWS[id] = (GPUwset[id] || isNewWrite) ? 1 : 0;
+  
   // the rset cache is also used as conflict detection
   rset[id] = isConfl ? args.batchCount : 0;
+  rwsetConfl[id] = isConflW ? 1 : 0;
 
   if (isConfl) {
     *HeTM_knl_global.isInterConfl = 1;

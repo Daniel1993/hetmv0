@@ -72,6 +72,7 @@ typedef struct HeTM_thread_
   cudaEvent_t cpyWSetStartEvent, cpyWSetStopEvent;
   float timeCpy;
   double timeCpySum;
+  double timeMemCpySum;
 
   cudaEvent_t cpyDatasetStartEvent, cpyDatasetStopEvent;
   float timeCpyDataset;
@@ -130,6 +131,8 @@ typedef struct HeTM_shared_
   // BMAP only, stores a cache for the wsetLog
   void *wsetCache;
   void *wsetCacheConfl;
+  void *wsetCacheConfl2;
+  void *wsetCacheConfl3; // CPU WS | GPU WS
   size_t wsetCacheSize, wsetCacheBits, nbChunks;
 
   // TODO: remove this is benchmark specific
@@ -152,11 +155,15 @@ typedef struct HeTM_statistics_ {
   long nbTxsGPU, nbCommittedTxsGPU, nbDroppedTxsGPU, nbAbortsGPU;
   long nbTxsCPU, nbCommittedTxsCPU, nbDroppedTxsCPU, nbAbortsCPU;
   size_t sizeCpyDataset, sizeCpyWSet /* ADDR|BMAP */, sizeCpyLogs /* ADDR|VERS */;
+  size_t sizeCpyWSetCPUData;
+  long nbBitmapConflicts;
+  long nbCPUdataConflicts;
   long txsNonBlocking;
   double timeNonBlocking, timeBlocking;
   double timeCMP, timeAfterCMP;
   double timeGPU, timePRSTM;
   double timeCPU;
+  double timeMemCpySum;
   double totalTimeCpyWSet, totalTimeCmp, totalTimeCpyDataset;
 } HeTM_statistics_s;
 

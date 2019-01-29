@@ -112,6 +112,7 @@ simple: $(OBJS)
 	# does not recompile everything
 	$(CXX) $(CXXFLAGS) -O3 -o $(SRC)/bank.o $(SRC)/bank.cpp
 	#$(CXX) $(CXXFLAGS) -O1 -o $(SRC)/memcd2.o $(SRC)/memcd2.cpp
+	sleep 1s
 	$(NVCC) $(LDFLAGS) -o $(APP) $(OBJS)
 
 # TODO: propagate PR_MAX_RWSET_SIZE and HETM_CMP_TYPE

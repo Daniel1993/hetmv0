@@ -732,7 +732,7 @@ cudaError_t jobWithCuda(int *a/*,int *state*/, const unsigned int size, ofstream
 				continue;
 			}
 			setup_kernel << <blockNum, threadNum >> >(devStates);
-			cudaThreadSynchronize();	//synchronize threads
+			cudaDeviceSynchronize();	//synchronize threads
 
 			cudaFuncSetCacheConfig(addKernelTransaction2, cudaFuncCachePreferL1);
 
@@ -742,7 +742,7 @@ cudaError_t jobWithCuda(int *a/*,int *state*/, const unsigned int size, ofstream
 
 
 			addKernelTransaction2 << <blockNum, threadNum >> >(dev_a, dev_mutex, dev_abortcount, devStates, size, dev_LogR, dev_LogW);
-			cudaThreadSynchronize();	//synchronize threads
+			cudaDeviceSynchronize();	//synchronize threads
 
 			sdkStopTimer(&kernelTime);	//get stop time
 

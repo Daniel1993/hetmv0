@@ -23,8 +23,6 @@ HIGH_CPU_THREADS=20
 
 rm -f Bank.csv
 
-# sleep 3h
-
 LARGE_DATASET=100000000 #2621440 # 90 000 000 is the max for my home machine
 # LARGE_DATASET=20000000 #2621440 # 90 000 000 is the max for my home machine
 LARGE_DATASET_P20=61000000 #2621440 # 90 000 000 is the max for my home machine
@@ -33,14 +31,17 @@ SMALL_DATASET_P20=122000 #2621440 # 90 000 000 is the max for my home machine
 
 function doRunLargeDTST {
 	# Seq. access, 18 items, prob. write {5..95}, writes 1%
-	for s in `seq 1 $SAMPLES`
+	for s in `seq 2 $SAMPLES`
 	do
-		# -n $CPU_THREADS -b 1024 -x 512 ---> changed to single threaded
-		timeout 40s ./bank -n $CPU_THREADS -b 640 -x 256 -a $LARGE_DATASET -d $DURATION -R 0 -S 16 -l 10 -N 1 -T 32 CPU_BACKOFF=180
-		timeout 40s ./bank -n $CPU_THREADS -b 640 -x 256 -a $LARGE_DATASET -d $DURATION -R 0 -S 16 -l 25 -N 1 -T 32 CPU_BACKOFF=180
-		timeout 40s ./bank -n $CPU_THREADS -b 640 -x 256 -a $LARGE_DATASET -d $DURATION -R 0 -S 16 -l 50 -N 1 -T 32 CPU_BACKOFF=180
-		timeout 40s ./bank -n $CPU_THREADS -b 640 -x 256 -a $LARGE_DATASET -d $DURATION -R 0 -S 16 -l 75 -N 1 -T 32 CPU_BACKOFF=180
-		timeout 40s ./bank -n $CPU_THREADS -b 640 -x 256 -a $LARGE_DATASET -d $DURATION -R 0 -S 16 -l 90 -N 1 -T 32 CPU_BACKOFF=180
+		# 100M 500M 1G 1.5G
+		timeout 40s ./bank -n $CPU_THREADS -b 640 -x 256 -a 2000000  -d $DURATION  -R 0 -S 16 -l 90 -N 1 -T 32 CPU_BACKOFF=180
+		timeout 40s ./bank -n $CPU_THREADS -b 640 -x 256 -a 5000000  -d $DURATION  -R 0 -S 16 -l 90 -N 1 -T 32 CPU_BACKOFF=180
+		timeout 40s ./bank -n $CPU_THREADS -b 640 -x 256 -a 15000000 -d $DURATION  -R 0 -S 16 -l 90 -N 1 -T 32 CPU_BACKOFF=180
+		timeout 40s ./bank -n $CPU_THREADS -b 640 -x 256 -a 25000000 -d $DURATION  -R 0 -S 16 -l 90 -N 1 -T 32 CPU_BACKOFF=180
+		timeout 40s ./bank -n $CPU_THREADS -b 640 -x 256 -a 65000000 -d $DURATION  -R 0 -S 16 -l 90 -N 1 -T 32 CPU_BACKOFF=180
+		timeout 40s ./bank -n $CPU_THREADS -b 640 -x 256 -a 125000000 -d $DURATION -R 0 -S 16 -l 90 -N 1 -T 32 CPU_BACKOFF=180
+		timeout 40s ./bank -n $CPU_THREADS -b 640 -x 256 -a 250000000 -d $DURATION -R 0 -S 16 -l 90 -N 1 -T 32 CPU_BACKOFF=180
+		timeout 40s ./bank -n $CPU_THREADS -b 640 -x 256 -a 375000000 -d $DURATION -R 0 -S 16 -l 90 -N 1 -T 32 CPU_BACKOFF=180
 		mv Bank.csv ${1}${s}
 	done
 }
@@ -48,15 +49,9 @@ function doRunLargeDTST {
 ### Fixed the amount of CPU threads
 CPU_THREADS=14
 
-############### LARGE
 ###########################################################################
-LARGE_DATASET=250000000
 
 ############### GPU-only
-# make clean ; make CMP_TYPE=COMPRESSED USE_TSX_IMPL=1 PR_MAX_RWSET_SIZE=20 GPU_PART=0.55 \
-# 	CPU_PART=0.55 P_INTERSECT=0.00 CPUEn=0 BANK_PART=1 PROFILE=1 -j 14
-# doRunLargeDTST GPUonly_rand_sep_BMAP_s
-
 make clean ; make CMP_TYPE=DISABLED USE_TSX_IMPL=1 CPUEn=0 PR_MAX_RWSET_SIZE=20 GPU_PART=0.55 \
 	CPU_PART=0.55 P_INTERSECT=0.00 BANK_PART=1 PROFILE=1 -j 14
 doRunLargeDTST GPUonly_rand_sep_DISABLED_s
@@ -66,106 +61,18 @@ make clean ; make INST_CPU=0 GPUEn=0 USE_TSX_IMPL=1 PR_MAX_RWSET_SIZE=20 \
 		BANK_PART=1 GPU_PART=0.55 CPU_PART=0.55 P_INTERSECT=0.00 PROFILE=1 -j 14
 doRunLargeDTST CPUonly_rand_sep_DISABLED_s
 
-# make clean ; make LOG_TYPE=VERS INST_CPU=1 GPUEn=0 USE_TSX_IMPL=1 PR_MAX_RWSET_SIZE=20 \
-# 	BANK_PART=1 GPU_PART=0.55 CPU_PART=0.55 P_INTERSECT=0.00 PROFILE=1 -j 14
-# doRunLargeDTST CPUonly_rand_sep_VERS_s
-#
-# make clean ; make LOG_TYPE=BMAP INST_CPU=1 GPUEn=0 USE_TSX_IMPL=1 PR_MAX_RWSET_SIZE=20 \
-# 	BANK_PART=1 GPU_PART=0.55 CPU_PART=0.55 P_INTERSECT=0.00 PROFILE=1 -j 14
-# doRunLargeDTST CPUonly_rand_sep_BMAP_s
-#
-# make clean ; make INST_CPU=0 GPUEn=0 USE_TSX_IMPL=0 PR_MAX_RWSET_SIZE=20 \
-# 		BANK_PART=1 GPU_PART=0.55 CPU_PART=0.55 P_INTERSECT=0.00 PROFILE=1 -j 14
-# doRunLargeDTST CPUonly_rand_sep_DISABLED_STM_s
-#
-# make clean ; make LOG_TYPE=VERS INST_CPU=1 GPUEn=0 USE_TSX_IMPL=0 PR_MAX_RWSET_SIZE=20 \
-# 	BANK_PART=1 GPU_PART=0.55 CPU_PART=0.55 P_INTERSECT=0.00 PROFILE=1 -j 14
-# doRunLargeDTST CPUonly_rand_sep_VERS_STM_s
-#
-# make clean ; make LOG_TYPE=BMAP INST_CPU=1 GPUEn=0 USE_TSX_IMPL=0 PR_MAX_RWSET_SIZE=20 \
-# 	BANK_PART=1 GPU_PART=0.55 CPU_PART=0.55 P_INTERSECT=0.00 PROFILE=1 -j 14
-# doRunLargeDTST CPUonly_rand_sep_BMAP_STM_s
-
 ############## VERS
-### STM
-# make clean ; make CMP_TYPE=COMPRESSED LOG_TYPE=VERS USE_TSX_IMPL=0 PR_MAX_RWSET_SIZE=20 \
-# 	BANK_PART=1 GPU_PART=0.55 CPU_PART=0.55 P_INTERSECT=0.00 PROFILE=1 -j 14
-# doRunLargeDTST VERS_rand_sep_STM_s
-
 make clean ; make CMP_TYPE=COMPRESSED LOG_TYPE=VERS USE_TSX_IMPL=1 PR_MAX_RWSET_SIZE=20 \
 	BANK_PART=1 GPU_PART=0.55 CPU_PART=0.55 P_INTERSECT=0.00 PROFILE=1 -j 14
 doRunLargeDTST VERS_rand_sep_s
 
-############# BMAP
-## STM
-# make clean ; make CMP_TYPE=COMPRESSED LOG_TYPE=BMAP USE_TSX_IMPL=0 PR_MAX_RWSET_SIZE=20 \
-# 	BANK_PART=1 GPU_PART=0.55 CPU_PART=0.55 P_INTERSECT=0.00 PROFILE=1 -j 14
-# doRunLargeDTST BMAP_rand_sep_STM_s
-
+############## BMAP
 make clean ; make CMP_TYPE=COMPRESSED LOG_TYPE=BMAP USE_TSX_IMPL=1 PR_MAX_RWSET_SIZE=20 \
 	BANK_PART=1 GPU_PART=0.55 CPU_PART=0.55 P_INTERSECT=0.00 PROFILE=1 -j 14
 doRunLargeDTST BMAP_rand_sep_s
 ###########################################################################
 
-############### SMALL
-###########################################################################
-LARGE_DATASET=25000000
-
-############### GPU-only
-# make clean ; make CMP_TYPE=COMPRESSED USE_TSX_IMPL=1 PR_MAX_RWSET_SIZE=20 GPU_PART=0.55 \
-# 	CPU_PART=0.55 P_INTERSECT=0.00 CPUEn=0 BANK_PART=1 PROFILE=1 -j 14
-# doRunLargeDTST GPUonly_rand_sep_BMAP_SMALL_s
-
-make clean ; make CMP_TYPE=DISABLED USE_TSX_IMPL=1 CPUEn=0 PR_MAX_RWSET_SIZE=20 GPU_PART=0.55 \
-	CPU_PART=0.55 P_INTERSECT=0.00 BANK_PART=1 PROFILE=1 -j 14
-doRunLargeDTST GPUonly_rand_sep_DISABLED_SMALL_s
-
-############## CPU-only
-make clean ; make INST_CPU=0 GPUEn=0 USE_TSX_IMPL=1 PR_MAX_RWSET_SIZE=20 \
-		BANK_PART=1 GPU_PART=0.55 CPU_PART=0.55 P_INTERSECT=0.00 PROFILE=1 -j 14
-doRunLargeDTST CPUonly_rand_sep_DISABLED_SMALL_s
-
-# make clean ; make LOG_TYPE=VERS INST_CPU=1 GPUEn=0 USE_TSX_IMPL=1 PR_MAX_RWSET_SIZE=20 \
-# 	BANK_PART=1 GPU_PART=0.55 CPU_PART=0.55 P_INTERSECT=0.00 PROFILE=1 -j 14
-# doRunLargeDTST CPUonly_rand_sep_VERS_SMALL_s
 #
-# make clean ; make LOG_TYPE=BMAP INST_CPU=1 GPUEn=0 USE_TSX_IMPL=1 PR_MAX_RWSET_SIZE=20 \
-# 	BANK_PART=1 GPU_PART=0.55 CPU_PART=0.55 P_INTERSECT=0.00 PROFILE=1 -j 14
-# doRunLargeDTST CPUonly_rand_sep_BMAP_SMALL_s
-#
-# make clean ; make INST_CPU=0 GPUEn=0 USE_TSX_IMPL=0 PR_MAX_RWSET_SIZE=20 \
-# 		BANK_PART=1 GPU_PART=0.55 CPU_PART=0.55 P_INTERSECT=0.00 PROFILE=1 -j 14
-# doRunLargeDTST CPUonly_rand_sep_DISABLED_STM_SMALL_s
-#
-# make clean ; make LOG_TYPE=VERS INST_CPU=1 GPUEn=0 USE_TSX_IMPL=0 PR_MAX_RWSET_SIZE=20 \
-# 	BANK_PART=1 GPU_PART=0.55 CPU_PART=0.55 P_INTERSECT=0.00 PROFILE=1 -j 14
-# doRunLargeDTST CPUonly_rand_sep_VERS_STM_SMALL_s
-#
-# make clean ; make LOG_TYPE=BMAP INST_CPU=1 GPUEn=0 USE_TSX_IMPL=0 PR_MAX_RWSET_SIZE=20 \
-# 	BANK_PART=1 GPU_PART=0.55 CPU_PART=0.55 P_INTERSECT=0.00 PROFILE=1 -j 14
-# doRunLargeDTST CPUonly_rand_sep_BMAP_STM_SMALL_s
-
-############## VERS
-### STM
-# make clean ; make CMP_TYPE=COMPRESSED LOG_TYPE=VERS USE_TSX_IMPL=0 PR_MAX_RWSET_SIZE=20 \
-# 	BANK_PART=1 GPU_PART=0.55 CPU_PART=0.55 P_INTERSECT=0.00 PROFILE=1 -j 14
-# doRunLargeDTST VERS_rand_sep_STM_SMALL_s
-
-make clean ; make CMP_TYPE=COMPRESSED LOG_TYPE=VERS USE_TSX_IMPL=1 PR_MAX_RWSET_SIZE=20 \
-	BANK_PART=1 GPU_PART=0.55 CPU_PART=0.55 P_INTERSECT=0.00 PROFILE=1 -j 14
-doRunLargeDTST VERS_rand_sep_SMALL_s
-
-############## BMAP
-### STM
-# make clean ; make CMP_TYPE=COMPRESSED LOG_TYPE=BMAP USE_TSX_IMPL=0 PR_MAX_RWSET_SIZE=20 \
-# 	BANK_PART=1 GPU_PART=0.55 CPU_PART=0.55 P_INTERSECT=0.00 PROFILE=1 -j 14
-# doRunLargeDTST BMAP_rand_sep_STM_SMALL_s
-
-make clean ; make CMP_TYPE=COMPRESSED LOG_TYPE=BMAP USE_TSX_IMPL=1 PR_MAX_RWSET_SIZE=20 \
-	BANK_PART=1 GPU_PART=0.55 CPU_PART=0.55 P_INTERSECT=0.00 PROFILE=1 -j 14
-doRunLargeDTST BMAP_rand_sep_SMALL_s
-###########################################################################
-
 #
 # ################ Contiguous
 #
@@ -289,5 +196,5 @@ doRunLargeDTST BMAP_rand_sep_SMALL_s
 # doRunLargeDTST BMAP_cont_sep_SMALL_s
 # ###########################################################################
 
-mkdir -p array_prec
-mv *_s* array_prec/
+mkdir -p array_dataset
+mv *_s* array_dataset/

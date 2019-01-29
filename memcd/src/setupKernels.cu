@@ -110,7 +110,7 @@ static void run_bankTx(knlman_callback_params_s params)
   input    = (HeTM_bankTx_input_s*)memman_get_cpu(NULL);
   inputDev = (HeTM_bankTx_input_s*)memman_get_gpu(NULL);
 
-  // CUDA_CHECK_ERROR(cudaThreadSynchronize(), ""); // sync the previous run
+  // CUDA_CHECK_ERROR(cudaDeviceSynchronize(), ""); // sync the previous run
 
   cudaFuncSetCacheConfig(bankTx, cudaFuncCachePreferL1);
 
@@ -152,7 +152,7 @@ static void run_memcdReadTx(knlman_callback_params_s params)
 
   // thread_local static unsigned short seed = 1234;
 
-  CUDA_CHECK_ERROR(cudaThreadSynchronize(), ""); // sync the previous run
+  CUDA_CHECK_ERROR(cudaDeviceSynchronize(), ""); // sync the previous run
 
   // memman_ad_hoc_free(NULL); // empties the previous parameters
   cudaFuncSetCacheConfig(memcdReadTx, cudaFuncCachePreferL1);

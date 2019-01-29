@@ -285,15 +285,20 @@ __device__ void update_tx(PR_txCallDefArgs, int txCount)
 	int *output_buffer = input->output_buffer;
 	int option = PR_rand(INT_MAX);
 	int tot_nb_threads = blockDim.x*gridDim.x;
+	int access_controller = devParsedData.access_controller;
+
+	unsigned writeAccountIdx;
+	unsigned readAccountIdx;
 
 	// before the transaction pick the accounts (needs PR-STM stuff)
 	// random_Kernel(PR_txCallArgs, idx, nbAccounts, is_intersection); //get random index
 	__syncthreads();
 	idx[0] = input_buffer[id+txCount*tot_nb_threads];
-	#pragma unroll
+
 	#pragma unroll
 	for (i = 1; i < read_intensive_size; i++) {
-		idx[i] = (idx[i-1] + 2) % nbAccounts; // access even accounts
+		// idx[i] = (idx[i-1] + 2) % nbAccounts; // access even accounts
+		idx[i] = (idx[i-1] + 1) % nbAccounts; // access even accounts
 	}
 	output_buffer[id] = 0;
 
@@ -307,13 +312,14 @@ __device__ void update_tx(PR_txCallDefArgs, int txCount)
 	// reads the accounts first, then mutates the locations
 	#pragma unroll
 	for (j = 0; j < read_intensive_size; j++)	{
-		if (idx[j] < 0 || idx[j] >= nbAccounts) {
+		readAccountIdx = idx[j] / access_controller;
+		if (readAccountIdx >= nbAccounts) {
 			break;
 		}
 #ifndef BANK_DISABLE_PRSTM
-		count_amount += PR_read(accounts + idx[j]);
+		count_amount += PR_read(accounts + readAccountIdx);
 #else /* PR-STM disabled */
-		count_amount += accounts[idx[j]];
+		count_amount += accounts[readAccountIdx];
 #endif
 	}
 
@@ -327,12 +333,18 @@ __device__ void update_tx(PR_txCallDefArgs, int txCount)
 		// nval = COMPUTE_TRANSFER(reads[target] - 1); // -money
 		nval = COMPUTE_TRANSFER(count_amount - 1); // -money
 
+			// TODO: store must be controlled with parsedData.access_controller
+		// -----------------
+
+		// int writeAccountIdx = idx[target];
+		writeAccountIdx = (unsigned)((double)idx[target] / (double)access_controller);
+
 		// nbAccounts / devParsedData.access_controller
-		if (idx[target] < nbAccounts) {
+		if (writeAccountIdx < nbAccounts) {
 #ifndef BANK_DISABLE_PRSTM
-		PR_write(accounts + idx[target], nval); //write changes to write set
+		  PR_write(accounts + writeAccountIdx, nval); //write changes to write set
 #else /* PR-STM disabled */
-		accounts[idx[target]] = nval; //write changes to write set
+	  	accounts[writeAccountIdx] = nval; //write changes to write set
 #endif
 		}
 		// __syncthreads();
@@ -348,6 +360,7 @@ __device__ void update_tx(PR_txCallDefArgs, int txCount)
 	// }
 #ifndef BANK_DISABLE_PRSTM
 	PR_txCommit();
+			// if (id == 0) printf("idx[target]=%i writeAccountIdx=%u\n", idx[target], writeAccountIdx);
 #else
 	if (args.nbCommits != NULL) args.nbCommits[PR_THREAD_IDX]++;
 #endif

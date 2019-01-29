@@ -46,12 +46,15 @@ typedef struct HeTM_knl_global_ {
   void *hostWSet;
   void *hostWSetCache;
   void *hostWSetCacheConfl;
+  void *hostWSetCacheConfl2;
+  void *hostWSetCacheConfl3; // CPU WS | GPU WS, to copy in case of abort
   size_t hostWSetCacheSize;
   size_t hostWSetCacheBits;
 	size_t hostWSetChunks;
 	int *PRLockTable;
 	void *randState;
 	int isGPUOnly;
+	void *GPUwsBmap;
 } HeTM_knl_global_s;
 
 #ifdef __cplusplus

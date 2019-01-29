@@ -14,7 +14,7 @@ DURATION=18000
 BLOCKS="2 4 8 16 32 64 256 512 1024" # 512
 THREADS="512" #"2 4 8 16 32 64 96 256 320 512 640 768 1024"
 BATCH_SIZE="4"
-SAMPLES=5
+SAMPLES=1
 #./makeTM.sh
 
 CPU_THREADS=4
@@ -31,7 +31,7 @@ SMALL_DATASET_P20=122000 #2621440 # 90 000 000 is the max for my home machine
 
 function doRunLargeDTST {
 	# Seq. access, 18 items, prob. write {5..95}, writes 1%
-	for s in `seq 2 $SAMPLES`
+	for s in `seq 1 $SAMPLES`
 	do
 		timeout 30s ./bank -n $CPU_THREADS -b 1024 -x 512 -a $LARGE_DATASET -d $DURATION -R 0 -S 18 -l 5  -N 1 -T 8 -G $GPU_INPUT -C $CPU_INPUT
 		timeout 30s ./bank -n $CPU_THREADS -b 1024 -x 512 -a $LARGE_DATASET -d $DURATION -R 0 -S 18 -l 10 -N 1 -T 8 -G $GPU_INPUT -C $CPU_INPUT
@@ -45,7 +45,7 @@ function doRunLargeDTST {
 }
 
 function doRunLargeDTSTZipf {
-	for s in `seq 2 $SAMPLES`
+	for s in `seq 1 $SAMPLES`
 	do
 		timeout 30s ./bank -n $CPU_THREADS -b 1024 -x 512 -a $LARGE_DATASET -d $DURATION -R 0 -S 2 -l 1   -N 1 -T 8 -G $GPU_INPUT -C $CPU_INPUT
 		timeout 30s ./bank -n $CPU_THREADS -b 1024 -x 512 -a $LARGE_DATASET -d $DURATION -R 0 -S 2 -l 4   -N 1 -T 8 -G $GPU_INPUT -C $CPU_INPUT
@@ -135,16 +135,16 @@ LARGE_DATASET=10000000
 CPU_THREADS=8 ### TODO: same nb of threads for tiny STM
 
 cd java_zipf
-GPU_INPUT="GPU_input_${LARGE_DATASET}_099_4194304.txt"
-CPU_INPUT="CPU_input_${LARGE_DATASET}_099_16384.txt"
+GPU_INPUT="GPU_input_${LARGE_DATASET}_099_67108864.txt"
+CPU_INPUT="CPU_input_${LARGE_DATASET}_099_2097152.txt"
 
 if [ ! -f ../$GPU_INPUT ]
 then
-	java Main $LARGE_DATASET 0.99 4194304 > ../$GPU_INPUT
+	java Main $LARGE_DATASET 0.99 67108864 > ../$GPU_INPUT
 fi
 if [ ! -f ../$CPU_INPUT ]
 then
-	java Main $LARGE_DATASET 0.99 16384 > ../$CPU_INPUT
+	java Main $LARGE_DATASET 0.99 2097152 > ../$CPU_INPUT
 fi
 cd ..
 

@@ -69,6 +69,8 @@ int HeTM_mempool_init(size_t pool_size)
   HeTM_shared_data.nbChunks = nbChunks;
 
   // printf(" <<<<<<< HeTM_shared_data.devMemPoolBackupBmap = %p\n",  HeTM_shared_data.devMemPoolBackupBmap);
+  memman_select("HeTM_mempool");
+  memman_bmap_s *mainBMap = (memman_bmap_s*) memman_get_bmap(NULL);
 
   HeTM_set_global_arg((HeTM_knl_global_s){
     .devMemPoolBasePtr  = HeTM_shared_data.devMemPool,
@@ -86,12 +88,15 @@ int HeTM_mempool_init(size_t pool_size)
     .hostWSet           = HeTM_shared_data.wsetLog,
     .hostWSetCache      = HeTM_shared_data.wsetCache,
     .hostWSetCacheConfl = HeTM_shared_data.wsetCacheConfl,
+    .hostWSetCacheConfl2= HeTM_shared_data.wsetCacheConfl2,
+    .hostWSetCacheConfl3= HeTM_shared_data.wsetCacheConfl3,
     .hostWSetCacheSize  = HeTM_shared_data.wsetCacheSize,
     .hostWSetCacheBits  = HeTM_shared_data.wsetCacheBits,
     .hostWSetChunks     = nbChunks,
     .PRLockTable        = PR_lockTableDev,
     .randState          = HeTM_shared_data.devCurandState,
-    .isGPUOnly          = (HeTM_shared_data.isCPUEnabled == 0)
+    .isGPUOnly          = (HeTM_shared_data.isCPUEnabled == 0),
+    .GPUwsBmap          = mainBMap->dev
   });
 
   curSize = 0;
@@ -121,7 +126,7 @@ void HeTM_initCurandState()
   memman_alloc_gpu("HeTM_curand_state", size, NULL, 0);
   HeTM_shared_data.devCurandState = memman_get_gpu(NULL);
   HeTM_setupCurand<<<nbBlocks, nbThreads>>>(HeTM_shared_data.devCurandState);
-  cudaThreadSynchronize(); // TODO: blocks
+  cudaDeviceSynchronize(); // TODO: blocks
 }
 
 void HeTM_destroyCurandState()
@@ -456,7 +461,7 @@ static void init_bmap(size_t pool_size)
   size_t nbGranules = pool_size / PR_LOCK_GRANULARITY;
   size_t granBmap;
 
-  size_t cacheSize = pool_size / CACHE_GRANULE_SIZE; // nbGranules / CACHE_GRANULE_SIZE;
+  size_t cacheSize = nbGranules / CACHE_GRANULE_SIZE; // nbGranules / CACHE_GRANULE_SIZE;
 
   if (pool_size % CACHE_GRANULE_SIZE > 0) {
     cacheSize++;
@@ -466,6 +471,8 @@ static void init_bmap(size_t pool_size)
 
   // GPU set to 1 to say there was a conflict
   memman_alloc_dual("HeTM_cpu_wset_cache_confl", cacheSize, MEMMAN_NONE);
+  memman_alloc_dual("HeTM_cpu_wset_cache_confl2", cacheSize, MEMMAN_NONE);
+  memman_alloc_dual("HeTM_cpu_wset_cache_confl3", cacheSize, MEMMAN_NONE);
 
   memman_select("HeTM_mempool");
   memman_bmap_s *mainBMap = (memman_bmap_s*) memman_get_bmap(&granBmap);
@@ -504,6 +511,14 @@ static void init_bmap(size_t pool_size)
   stm_wsetCPUCache               = memman_get_cpu(NULL);
   stm_wsetCPUCacheBits           = CACHE_GRANULE_BITS;
 
+  memman_select("HeTM_cpu_wset_cache_confl2");
+  memman_zero_cpu(NULL);
+  memman_zero_gpu(NULL);
+  HeTM_shared_data.wsetCacheConfl2 = memman_get_gpu(NULL);
+  memman_select("HeTM_cpu_wset_cache_confl3");
+  memman_zero_cpu(NULL);
+  memman_zero_gpu(NULL);
+  HeTM_shared_data.wsetCacheConfl3 = memman_get_gpu(NULL);
   memman_select("HeTM_cpu_wset_cache_confl");
   memman_zero_cpu(NULL);
   memman_zero_gpu(NULL);

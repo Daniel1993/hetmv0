@@ -242,10 +242,10 @@ static void cpyWSetToGPU()
   }
 
   if (!HeTM_thread_data->isCpyDone && HeTM_thread_data->statusCMP == HETM_CPY_ASYNC) {
-    return; // not ready yet
+    return; // cpy not ready yet
   }
   if (!HeTM_thread_data->isCmpDone && HeTM_thread_data->statusCMP == HETM_CMP_ASYNC) {
-    return; // not ready yet
+    return; // cmp not ready yet
   }
 
   if (HeTM_thread_data->isCpyDone && HeTM_thread_data->statusCMP == HETM_CPY_ASYNC) {

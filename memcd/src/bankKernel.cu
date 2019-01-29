@@ -245,7 +245,7 @@ __device__ void readOnly_tx(PR_txCallDefArgs, int txCount)
 		}
 #ifndef BANK_DISABLE_PRSTM
 
-		// int targetAccount = idx[j] % (nbAccounts / devParsedData.access_controller);
+		// int targetAccount = idx[j] % (nbAccounts);
 		resF += (float)PR_read(accounts + idx[j]) * INTEREST_RATE;
 		// resF = cos(resF);
 
@@ -321,23 +321,21 @@ __device__ void update_tx(PR_txCallDefArgs, int txCount)
 #endif
 	}
 
-	#pragma unroll
-	for (j = 0; j < BANK_NB_TRANSFERS / 2; ++j) {
-		// TODO: make the GPU slower
-		target = j*2;
-		if (idx[j] < 0 || idx[j] >= nbAccounts || idx[target] < 0 || idx[target] >= nbAccounts) {
-			break;
-		}
-		// nval = COMPUTE_TRANSFER(reads[target] - 1); // -money
-		nval = COMPUTE_TRANSFER(count_amount - 1); // -money
-		if (idx[target] < nbAccounts / devParsedData.access_controller) {
+	// TODO: make the GPU slower
+	target = 0;
+	if (idx[target] < 0 || idx[target] >= nbAccounts) {
+		break;
+	}
+	// nval = COMPUTE_TRANSFER(reads[target] - 1); // -money
+	nval = COMPUTE_TRANSFER(count_amount - 1); // -money
+	if (idx[target] < nbAccounts) {
 #ifndef BANK_DISABLE_PRSTM
 		PR_write(accounts + idx[target], nval); //write changes to write set
 #else /* PR-STM disabled */
 		accounts[idx[target]] = nval; //write changes to write set
 #endif
-		}
-		// __syncthreads();
+	}
+	// __syncthreads();
 // TODO: only 1 write now
 // 		target = j*2+1;
 // 		__syncthreads();
@@ -347,7 +345,6 @@ __device__ void update_tx(PR_txCallDefArgs, int txCount)
 // #else /* PR-STM disabled */
 // 		accounts[idx[target]] = nval; //write changes to write set
 // #endif
-	}
 #ifndef BANK_DISABLE_PRSTM
 	PR_txCommit();
 #else
@@ -517,7 +514,7 @@ void memcdReadTx(PR_globalKernelArgs)
 	// __syncthreads();
 
 	for (int i = 0; i < devParsedData.trans; ++i) { // num_ways keys
-		out[id*devParsedData.trans + i].isFound = 0;
+		// out[threadIdx.x+blockDim.x*blockIdx.x*devParsedData.trans + i].isFound = 0;
 	}
 
 	for (int i = 0; i < (nbWays + devParsedData.trans); ++i) { // num_ways keys

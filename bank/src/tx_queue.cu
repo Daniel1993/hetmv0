@@ -93,7 +93,7 @@ cudaError_t queue_Init(queue_t *q, cuda_t *cd, int shared_rate, int q_size, long
 	upper = nbAccounts >> 2;
   lower = 0;
 	queue_generate_kernel <<< blocksQueue, cd->threadNum >>>(devStates, temp_q, lower, upper);
-	cudaStatus = cudaThreadSynchronize();	//synchronize threads
+	cudaStatus = cudaDeviceSynchronize();	//synchronize threads
 	if (cudaStatus != cudaSuccess) {
 		printf("queue_generate_kernel failed!");
 	}
@@ -110,7 +110,7 @@ cudaError_t queue_Init(queue_t *q, cuda_t *cd, int shared_rate, int q_size, long
 	upper = nbAccounts >> 1;
   lower = nbAccounts >> 2;
 	queue_generate_kernel<<<blocksQueue, cd->threadNum>>>(devStates, temp_q, lower, upper);
-	cudaStatus = cudaThreadSynchronize();	//synchronize threads
+	cudaStatus = cudaDeviceSynchronize();	//synchronize threads
 	if (cudaStatus != cudaSuccess) {
 		printf("queue_generate_kernel failed!");
 	}
@@ -125,7 +125,7 @@ cudaError_t queue_Init(queue_t *q, cuda_t *cd, int shared_rate, int q_size, long
 	upper = nbAccounts;
   lower = nbAccounts >> 1;
 	queue_generate_kernel<<<blocksQueue, cd->threadNum>>>(devStates, temp_q, lower, upper);
-	cudaStatus = cudaThreadSynchronize();	//synchronize threads
+	cudaStatus = cudaDeviceSynchronize();	//synchronize threads
 	if (cudaStatus != cudaSuccess) {
 		printf("queue_generate_kernel failed!");
 	}

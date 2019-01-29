@@ -14,7 +14,7 @@ DURATION=30000
 BLOCKS="2 4 8 16 32 64 256 512 1024" # 512
 THREADS="512" #"2 4 8 16 32 64 96 256 320 512 640 768 1024"
 BATCH_SIZE="4"
-SAMPLES=2
+SAMPLES=10
 #./makeTM.sh
 
 CPU_THREADS=4
@@ -153,8 +153,8 @@ function actualRun {
 function doRun_HeTM_SHARED_steal {
 	# BANK_PART=3 --> unif rand
 	make clean ; make CMP_TYPE=COMPRESSED BANK_PART=6 \
-		PR_MAX_RWSET_SIZE=20 LOG_TYPE=${2} USE_TSX_IMPL=1 PROFILE=1 -j 14 \
-		BENCH=MEMCD CPU_STEAL_ONLY_GETS=0 DISABLE_NON_BLOCKING=0 DEFAULT_BITMAP_GRANULARITY_BITS=13 >/dev/null
+		PR_MAX_RWSET_SIZE=20 LOG_TYPE=VERS USE_TSX_IMPL=1 PROFILE=1 -j 14 \
+		BENCH=MEMCD CPU_STEAL_ONLY_GETS=0 DISABLE_NON_BLOCKING=0 DEFAULT_BITMAP_GRANULARITY_BITS=15 >/dev/null
 	# make clean ; make CMP_TYPE=COMPRESSED BANK_PART=3 \
 	# 	PR_MAX_RWSET_SIZE=20 LOG_TYPE=${2} USE_TSX_IMPL=1 PROFILE=1 -j 14 \
 	# 	BENCH=MEMCD CPU_STEAL_ONLY_GETS=0 >/dev/null
@@ -181,107 +181,224 @@ function doRun_HeTM_SHARED_steal {
 		GPU_THREADS=512
 		actualRun GPUsteal 0.0 0.0
 		###
-		mv GPUsteal.csv ${1}_GPUsteal_00_s${s}
+		mv GPUsteal.csv ${1}_VERS_non_blocking_s${s}
 	done
+	make clean ; make CMP_TYPE=COMPRESSED BANK_PART=6 \
+		PR_MAX_RWSET_SIZE=20 LOG_TYPE=VERS USE_TSX_IMPL=1 PROFILE=1 -j 14 \
+		BENCH=MEMCD CPU_STEAL_ONLY_GETS=0 DISABLE_NON_BLOCKING=1 DEFAULT_BITMAP_GRANULARITY_BITS=15 >/dev/null
+	# make clean ; make CMP_TYPE=COMPRESSED BANK_PART=3 \
+	# 	PR_MAX_RWSET_SIZE=20 LOG_TYPE=${2} USE_TSX_IMPL=1 PROFILE=1 -j 14 \
+	# 	BENCH=MEMCD CPU_STEAL_ONLY_GETS=0 >/dev/null
 	for s in `seq 1 $SAMPLES`
 	do
 		### 64 k
 		GPU_BLOCKS=128
 		GPU_THREADS=128
-		actualRun GPUsteal 0.1 0.0
+		actualRun GPUsteal 0.0 0.0
 		### 128 k
 		GPU_BLOCKS=128
 		GPU_THREADS=256
-		actualRun GPUsteal 0.1 0.0
+		actualRun GPUsteal 0.0 0.0
 		### 256 k
 		GPU_BLOCKS=256
 		GPU_THREADS=256
-		actualRun GPUsteal 0.1 0.0
+		actualRun GPUsteal 0.0 0.0
 		### 512 k
 		GPU_BLOCKS=512
 		GPU_THREADS=256
-		actualRun GPUsteal 0.1 0.0
+		actualRun GPUsteal 0.0 0.0
 		### 1M
 		GPU_BLOCKS=512
 		GPU_THREADS=512
-		actualRun GPUsteal 0.1 0.0
+		actualRun GPUsteal 0.0 0.0
 		###
-		mv GPUsteal.csv ${1}_GPUsteal_01_s${s}
+		mv GPUsteal.csv ${1}_VERS_blocking_s${s}
 	done
+	make clean ; make CMP_TYPE=COMPRESSED BANK_PART=6 \
+		PR_MAX_RWSET_SIZE=20 LOG_TYPE=BMAP USE_TSX_IMPL=1 PROFILE=1 -j 14 \
+		BENCH=MEMCD CPU_STEAL_ONLY_GETS=0 DISABLE_NON_BLOCKING=1 DEFAULT_BITMAP_GRANULARITY_BITS=10 >/dev/null
+	# make clean ; make CMP_TYPE=COMPRESSED BANK_PART=3 \
+	# 	PR_MAX_RWSET_SIZE=20 LOG_TYPE=${2} USE_TSX_IMPL=1 PROFILE=1 -j 14 \
+	# 	BENCH=MEMCD CPU_STEAL_ONLY_GETS=0 >/dev/null
 	for s in `seq 1 $SAMPLES`
 	do
 		### 64 k
 		GPU_BLOCKS=128
 		GPU_THREADS=128
-		actualRun GPUsteal 0.5 0.0
+		actualRun GPUsteal 0.0 0.0
 		### 128 k
 		GPU_BLOCKS=128
 		GPU_THREADS=256
-		actualRun GPUsteal 0.5 0.0
+		actualRun GPUsteal 0.0 0.0
 		### 256 k
 		GPU_BLOCKS=256
 		GPU_THREADS=256
-		actualRun GPUsteal 0.5 0.0
+		actualRun GPUsteal 0.0 0.0
 		### 512 k
 		GPU_BLOCKS=512
 		GPU_THREADS=256
-		actualRun GPUsteal 0.5 0.0
+		actualRun GPUsteal 0.0 0.0
 		### 1M
 		GPU_BLOCKS=512
 		GPU_THREADS=512
-		actualRun GPUsteal 0.5 0.0
+		actualRun GPUsteal 0.0 0.0
 		###
-		mv GPUsteal.csv ${1}_GPUsteal_05_s${s}
+		mv GPUsteal.csv ${1}_BMAP_10bits_s${s}
 	done
+	make clean ; make CMP_TYPE=COMPRESSED BANK_PART=6 \
+		PR_MAX_RWSET_SIZE=20 LOG_TYPE=BMAP USE_TSX_IMPL=1 PROFILE=1 -j 14 \
+		BENCH=MEMCD CPU_STEAL_ONLY_GETS=0 DISABLE_NON_BLOCKING=1 DEFAULT_BITMAP_GRANULARITY_BITS=12 >/dev/null
+	# make clean ; make CMP_TYPE=COMPRESSED BANK_PART=3 \
+	# 	PR_MAX_RWSET_SIZE=20 LOG_TYPE=${2} USE_TSX_IMPL=1 PROFILE=1 -j 14 \
+	# 	BENCH=MEMCD CPU_STEAL_ONLY_GETS=0 >/dev/null
 	for s in `seq 1 $SAMPLES`
 	do
 		### 64 k
 		GPU_BLOCKS=128
 		GPU_THREADS=128
-		actualRun GPUsteal 0.9 0.0
+		actualRun GPUsteal 0.0 0.0
 		### 128 k
 		GPU_BLOCKS=128
 		GPU_THREADS=256
-		actualRun GPUsteal 0.9 0.0
+		actualRun GPUsteal 0.0 0.0
 		### 256 k
 		GPU_BLOCKS=256
 		GPU_THREADS=256
-		actualRun GPUsteal 0.9 0.0
+		actualRun GPUsteal 0.0 0.0
 		### 512 k
 		GPU_BLOCKS=512
 		GPU_THREADS=256
-		actualRun GPUsteal 0.9 0.0
+		actualRun GPUsteal 0.0 0.0
 		### 1M
 		GPU_BLOCKS=512
 		GPU_THREADS=512
-		actualRun GPUsteal 0.9 0.0
+		actualRun GPUsteal 0.0 0.0
 		###
-		mv GPUsteal.csv ${1}_GPUsteal_09_s${s}
+		mv GPUsteal.csv ${1}_BMAP_12bits_s${s}
 	done
+	make clean ; make CMP_TYPE=COMPRESSED BANK_PART=6 \
+		PR_MAX_RWSET_SIZE=20 LOG_TYPE=BMAP USE_TSX_IMPL=1 PROFILE=1 -j 14 \
+		BENCH=MEMCD CPU_STEAL_ONLY_GETS=0 DISABLE_NON_BLOCKING=1 DEFAULT_BITMAP_GRANULARITY_BITS=13 >/dev/null
+	# make clean ; make CMP_TYPE=COMPRESSED BANK_PART=3 \
+	# 	PR_MAX_RWSET_SIZE=20 LOG_TYPE=${2} USE_TSX_IMPL=1 PROFILE=1 -j 14 \
+	# 	BENCH=MEMCD CPU_STEAL_ONLY_GETS=0 >/dev/null
 	for s in `seq 1 $SAMPLES`
 	do
 		### 64 k
 		GPU_BLOCKS=128
 		GPU_THREADS=128
-		actualRun GPUsteal 1.0 0.0
+		actualRun GPUsteal 0.0 0.0
 		### 128 k
 		GPU_BLOCKS=128
 		GPU_THREADS=256
-		actualRun GPUsteal 1.0 0.0
+		actualRun GPUsteal 0.0 0.0
 		### 256 k
 		GPU_BLOCKS=256
 		GPU_THREADS=256
-		actualRun GPUsteal 1.0 0.0
+		actualRun GPUsteal 0.0 0.0
 		### 512 k
 		GPU_BLOCKS=512
 		GPU_THREADS=256
-		actualRun GPUsteal 1.0 0.0
+		actualRun GPUsteal 0.0 0.0
 		### 1M
 		GPU_BLOCKS=512
 		GPU_THREADS=512
-		actualRun GPUsteal 1.0 0.0
+		actualRun GPUsteal 0.0 0.0
 		###
-		mv GPUsteal.csv ${1}_GPUsteal_10_s${s}
+		mv GPUsteal.csv ${1}_BMAP_13bits_s${s}
+	done
+	make clean ; make CMP_TYPE=COMPRESSED BANK_PART=6 \
+		PR_MAX_RWSET_SIZE=20 LOG_TYPE=BMAP USE_TSX_IMPL=1 PROFILE=1 -j 14 \
+		BENCH=MEMCD CPU_STEAL_ONLY_GETS=0 DISABLE_NON_BLOCKING=1 DEFAULT_BITMAP_GRANULARITY_BITS=14 >/dev/null
+	# make clean ; make CMP_TYPE=COMPRESSED BANK_PART=3 \
+	# 	PR_MAX_RWSET_SIZE=20 LOG_TYPE=${2} USE_TSX_IMPL=1 PROFILE=1 -j 14 \
+	# 	BENCH=MEMCD CPU_STEAL_ONLY_GETS=0 >/dev/null
+	for s in `seq 1 $SAMPLES`
+	do
+		### 64 k
+		GPU_BLOCKS=128
+		GPU_THREADS=128
+		actualRun GPUsteal 0.0 0.0
+		### 128 k
+		GPU_BLOCKS=128
+		GPU_THREADS=256
+		actualRun GPUsteal 0.0 0.0
+		### 256 k
+		GPU_BLOCKS=256
+		GPU_THREADS=256
+		actualRun GPUsteal 0.0 0.0
+		### 512 k
+		GPU_BLOCKS=512
+		GPU_THREADS=256
+		actualRun GPUsteal 0.0 0.0
+		### 1M
+		GPU_BLOCKS=512
+		GPU_THREADS=512
+		actualRun GPUsteal 0.0 0.0
+		###
+		mv GPUsteal.csv ${1}_BMAP_14bits_s${s}
+	done
+	make clean ; make CMP_TYPE=COMPRESSED BANK_PART=6 \
+		PR_MAX_RWSET_SIZE=20 LOG_TYPE=BMAP USE_TSX_IMPL=1 PROFILE=1 -j 14 \
+		BENCH=MEMCD CPU_STEAL_ONLY_GETS=0 DISABLE_NON_BLOCKING=1 DEFAULT_BITMAP_GRANULARITY_BITS=16 >/dev/null
+	# make clean ; make CMP_TYPE=COMPRESSED BANK_PART=3 \
+	# 	PR_MAX_RWSET_SIZE=20 LOG_TYPE=${2} USE_TSX_IMPL=1 PROFILE=1 -j 14 \
+	# 	BENCH=MEMCD CPU_STEAL_ONLY_GETS=0 >/dev/null
+	for s in `seq 1 $SAMPLES`
+	do
+		### 64 k
+		GPU_BLOCKS=128
+		GPU_THREADS=128
+		actualRun GPUsteal 0.0 0.0
+		### 128 k
+		GPU_BLOCKS=128
+		GPU_THREADS=256
+		actualRun GPUsteal 0.0 0.0
+		### 256 k
+		GPU_BLOCKS=256
+		GPU_THREADS=256
+		actualRun GPUsteal 0.0 0.0
+		### 512 k
+		GPU_BLOCKS=512
+		GPU_THREADS=256
+		actualRun GPUsteal 0.0 0.0
+		### 1M
+		GPU_BLOCKS=512
+		GPU_THREADS=512
+		actualRun GPUsteal 0.0 0.0
+		###
+		mv GPUsteal.csv ${1}_BMAP_16bits_s${s}
+	done
+	make clean ; make CMP_TYPE=COMPRESSED BANK_PART=6 \
+		PR_MAX_RWSET_SIZE=20 LOG_TYPE=BMAP USE_TSX_IMPL=1 PROFILE=1 -j 14 \
+		BENCH=MEMCD CPU_STEAL_ONLY_GETS=0 DISABLE_NON_BLOCKING=1 DEFAULT_BITMAP_GRANULARITY_BITS=18 >/dev/null
+	# make clean ; make CMP_TYPE=COMPRESSED BANK_PART=3 \
+	# 	PR_MAX_RWSET_SIZE=20 LOG_TYPE=${2} USE_TSX_IMPL=1 PROFILE=1 -j 14 \
+	# 	BENCH=MEMCD CPU_STEAL_ONLY_GETS=0 >/dev/null
+	for s in `seq 1 $SAMPLES`
+	do
+		### 64 k
+		GPU_BLOCKS=128
+		GPU_THREADS=128
+		actualRun GPUsteal 0.0 0.0
+		### 128 k
+		GPU_BLOCKS=128
+		GPU_THREADS=256
+		actualRun GPUsteal 0.0 0.0
+		### 256 k
+		GPU_BLOCKS=256
+		GPU_THREADS=256
+		actualRun GPUsteal 0.0 0.0
+		### 512 k
+		GPU_BLOCKS=512
+		GPU_THREADS=256
+		actualRun GPUsteal 0.0 0.0
+		### 1M
+		GPU_BLOCKS=512
+		GPU_THREADS=512
+		actualRun GPUsteal 0.0 0.0
+		###
+		mv GPUsteal.csv ${1}_BMAP_18bits_s${s}
 	done
 }
 
@@ -339,8 +456,7 @@ SIZE_ZIPF=2000000
 GPU_INPUT="GPU_input_${SIZE_ZIPF}_099_25165824.txt"
 CPU_INPUT="CPU_input_${SIZE_ZIPF}_099_1310720.txt"
 
-doRun_HeTM_SHARED_steal memcd_VERS_LARGE VERS
-doRun_HeTM_SHARED_steal memcd_BMAP_LARGE BMAP
+doRun_HeTM_SHARED_steal memcd_LARGE
 
 doRun_GPUonly memcd_LARGE
 doRun_CPUonly memcd_LARGE
@@ -354,8 +470,7 @@ SIZE_ZIPF=2000000
 GPU_INPUT="GPU_input_${SIZE_ZIPF}_099_25165824.txt"
 CPU_INPUT="CPU_input_${SIZE_ZIPF}_099_1310720.txt"
 
-doRun_HeTM_SHARED_steal memcd_VERS_SMALL VERS
-doRun_HeTM_SHARED_steal memcd_BMAP_SMALL BMAP
+doRun_HeTM_SHARED_steal memcd_SMALL
 
 doRun_GPUonly memcd_SMALL
 doRun_CPUonly memcd_SMALL

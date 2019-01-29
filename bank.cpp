@@ -62,7 +62,7 @@ static int fill_GPU_input_buffers()
 	unsigned rnd = RAND_R_FNC(input_seed);
 	for (int i = 0; i < buffer_last; ++i) {
 		unsigned j = rnd % parsedData.nb_accounts;
-		int target_page = (j / parsedData.GPUthreadNum / parsedData.access_controller) % nbPages;
+		int target_page = (j / parsedData.GPUthreadNum) % nbPages;
 		int access = (j % PAGE_SIZE) + target_page * PAGE_SIZE;
 		cpu_ptr[i] = access;
 		cpu_ptr[i] &= (unsigned)-2; // get even accounts
@@ -76,7 +76,7 @@ static int fill_GPU_input_buffers()
 	rnd = RAND_R_FNC(input_seed);
 	for (int i = 1; i < buffer_last; ++i) {
 		unsigned j = rnd % parsedData.nb_accounts;
-		int target_page = (j / parsedData.GPUthreadNum / parsedData.access_controller) % nbPages;
+		int target_page = (j / parsedData.GPUthreadNum) % nbPages;
 		int access = (j % PAGE_SIZE) + target_page * PAGE_SIZE;
 		cpu_ptr[i] = access;
 		cpu_ptr[i] &= (unsigned)-2; // get even accounts
@@ -86,7 +86,7 @@ static int fill_GPU_input_buffers()
 	for (int i = 0; i < buffer_last; ++i) {
 		unsigned rnd = RAND_R_FNC(input_seed);
 		unsigned j = rnd % parsedData.nb_accounts;
-		int target_page = (j / parsedData.GPUthreadNum / parsedData.access_controller) % nbPages;
+		int target_page = (j / parsedData.GPUthreadNum) % nbPages;
 		int access = (j % PAGE_SIZE) + target_page * PAGE_SIZE;
 		cpu_ptr[i] = access;
 		cpu_ptr[i] &= (unsigned)-2; // get even accounts
@@ -99,7 +99,7 @@ static int fill_GPU_input_buffers()
 	for (int i = 1; i < buffer_last; ++i) {
 		unsigned rnd = RAND_R_FNC(input_seed);
 		unsigned j = rnd % parsedData.nb_accounts;
-		int target_page = (j / parsedData.GPUthreadNum / parsedData.access_controller) % nbPages;
+		int target_page = (j / parsedData.GPUthreadNum) % nbPages;
 		int access = (j % PAGE_SIZE) + target_page * PAGE_SIZE;
 		cpu_ptr[i] = access;
 		cpu_ptr[i] &= (unsigned)-2; // get even accounts
@@ -123,7 +123,7 @@ static int fill_CPU_input_buffers()
 	unsigned rnd = RAND_R_FNC(input_seed);
 	for (int i = 0; i < good_buffers_last; ++i) {
 		unsigned j = rnd % parsedData.nb_accounts;
-		int target_page = (j / parsedData.nb_threadsCPU / parsedData.access_controller) % nbPages;
+		int target_page = (j / parsedData.nb_threadsCPU) % nbPages;
 		int access = (j % PAGE_SIZE) + target_page * PAGE_SIZE;
 		CPUInputBuffer[i] = access;
 		CPUInputBuffer[i] |= 1; // get odd accounts
@@ -135,7 +135,7 @@ static int fill_CPU_input_buffers()
 	rnd = RAND_R_FNC(input_seed);
 	for (int i = good_buffers_last; i < bad_buffers_last; ++i) {
 		unsigned j = rnd % parsedData.nb_accounts;
-		int target_page = (j / parsedData.nb_threadsCPU / parsedData.access_controller) % nbPages;
+		int target_page = (j / parsedData.nb_threadsCPU) % nbPages;
 		int access = (j % PAGE_SIZE) + target_page * PAGE_SIZE;
 		CPUInputBuffer[i] = access;
 		CPUInputBuffer[i] |= 1; // get odd accounts
@@ -145,7 +145,7 @@ static int fill_CPU_input_buffers()
 	for (int i = 0; i < good_buffers_last; ++i) {
 		unsigned rnd = RAND_R_FNC(input_seed);
 		unsigned j = rnd % parsedData.nb_accounts;
-		int target_page = (j / parsedData.nb_threadsCPU / parsedData.access_controller) % nbPages;
+		int target_page = (j / parsedData.nb_threadsCPU) % nbPages;
 		int access = (j % PAGE_SIZE) + target_page * PAGE_SIZE;
 		CPUInputBuffer[i] = access;
 		CPUInputBuffer[i] |= 1; // get odd accounts
@@ -156,7 +156,7 @@ static int fill_CPU_input_buffers()
 	for (int i = good_buffers_last; i < bad_buffers_last; ++i) {
 		unsigned rnd = RAND_R_FNC(input_seed);
 		unsigned j = rnd % parsedData.nb_accounts;
-		int target_page = (j / parsedData.nb_threadsCPU / parsedData.access_controller) % nbPages;
+		int target_page = (j / parsedData.nb_threadsCPU) % nbPages;
 		int access = (j % PAGE_SIZE) + target_page * PAGE_SIZE;
 		CPUInputBuffer[i] = access;
 		CPUInputBuffer[i] |= 1; // get odd accounts

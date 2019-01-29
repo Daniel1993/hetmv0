@@ -345,6 +345,7 @@ void bank_printStats(thread_data_t *data)
   printf(" DATA TRANSFERED (B)\n");
   printf("   > LOGS (VERS, ADDR) = %zuB\n", HeTM_stats_data.sizeCpyLogs);
   printf("   > WSet (ADDR, BMAP) = %zuB\n", HeTM_stats_data.sizeCpyWSet);
+  printf("   > WSetData   (BMAP) = %zuB\n", HeTM_stats_data.sizeCpyWSetCPUData);
   printf("   > Dataset           = %zuB\n", HeTM_stats_data.sizeCpyDataset);
 }
 
@@ -393,7 +394,7 @@ void bank_statsFile(thread_data_t *data)
         "CPU_PART(6);"
         "GPU_PART(7);"
         "P_INTERSECT(8);"
-      	"DURATION(9);"
+      	"BMAP_WSETDATA(9);"
       	"REAL_DURATION(10);"
       	"NB_CPU_COMMITS(11);"
       	"NB_GPU_COMMITS(12);"
@@ -419,7 +420,7 @@ void bank_statsFile(thread_data_t *data)
         "SIZE_CPY_LOGS(32);"
         "SIZE_CPY_WSET(33);"
         "SIZE_CPY_DATASET(34);"
-        "PROB_HOTSPOT(35);"
+        "TIME_BMAP_MEMCPY(35);"
         "SIZE_HOTSPOT(36)"
         "\n"
       );
@@ -432,6 +433,7 @@ void bank_statsFile(thread_data_t *data)
       throughputBetweenBatches = 0;
     }
 
+    // All times are in seconds! (/1000.0 --> CUDA uses ms)
     // TODO: REFACTOR NAMES OF VARIABLES!!!
     fprintf(f, "%i;" , data->nb_accounts                     ); // NB_ACCOUNTS(1)
     fprintf(f, "%i;" , data->nb_threadsCPU                   ); // CPU_THREADS(2)
@@ -441,7 +443,7 @@ void bank_statsFile(thread_data_t *data)
     fprintf(f, "%f;" , CPU_PART                              ); // CPU_PART(6)
     fprintf(f, "%f;" , GPU_PART                              ); // GPU_PART(7)
     fprintf(f, "%f;" , P_INTERSECT                           ); // P_INTERSECT(8)
-    fprintf(f, "%f;" , data->tot_duration[data->iter/2]      ); // DURATION(9)
+    fprintf(f, "%lu;" , HeTM_stats_data.sizeCpyWSetCPUData   ); // BMAP_WSETDATA(9)
     fprintf(f, "%f;" , data->tot_duration2[data->iter/2]     ); // REAL_DURATION(10)
     fprintf(f, "%lu;", data->tot_commits[data->iter/2]       ); // NB_CPU_COMMITS(11)
     fprintf(f, "%lu;", data->tot_commits_gpu[data->iter/2]   ); // NB_GPU_COMMITS(12)
@@ -467,7 +469,7 @@ void bank_statsFile(thread_data_t *data)
     fprintf(f, "%zu;", HeTM_stats_data.sizeCpyLogs           ); // SIZE_CPY_LOGS(32)
     fprintf(f, "%zu;", HeTM_stats_data.sizeCpyWSet           ); // SIZE_CPY_WSET(33)
     fprintf(f, "%zu;", HeTM_stats_data.sizeCpyDataset        ); // SIZE_CPY_DATASET(34)
-    fprintf(f, "%i;" , data->hprob                           ); // PROB_HOTSPOT(35)
+    fprintf(f, "%f;" , HeTM_stats_data.timeMemCpySum         ); // TIME_BMAP_MEMCPY(35)
     fprintf(f, "%f"  , data->hmult                           ); // SIZE_HOTSPOT(36)
     fprintf(f, "\n");
     fclose(f);

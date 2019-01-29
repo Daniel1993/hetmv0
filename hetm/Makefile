@@ -102,7 +102,7 @@ all: $(LIB)
 
 $(LIB): $(OBJS)
 	@echo "Linking..."
-	$(NVCC) $(NVFLAGS) -O2 -o $(SRC)/hetm-threading-gpu.o $(SRC)/hetm-threading-gpu.cu
+	# $(NVCC) $(NVFLAGS) -O2 -o $(SRC)/hetm-threading-gpu.o $(SRC)/hetm-threading-gpu.cu
 	### TODO: any optimization level blocks for VERS --> TODO: do optimization for BMAP
 	$(NVCC) $(NVFLAGS) -O2 -o $(SRC)/hetm-threading-cpu.o $(SRC)/hetm-threading-cpu.cu
 	$(CXX) $(CXXFLAGS) -O2 -o $(SRC)/hetm-producer-consumer.o $(SRC)/hetm-producer-consumer.cpp

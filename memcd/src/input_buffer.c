@@ -380,7 +380,7 @@ void GPUbuffer_ZIPF_2()
   int buffer_last = size_of_GPU_input_buffer/4/sizeof(int);
 
   // 1st item is generated 10% of the times
-  zipf_setup(parsedData.CONFL_SPACE, 0.4);
+  zipf_setup(parsedData.CONFL_SPACE, 0.6);
 
 	// if (zipf_dist == NULL) {
 	// 	generator.seed(input_seed);
@@ -425,7 +425,7 @@ void CPUbuffer_ZIPF_2()
   int bad_buffers_last = 2*size_of_CPU_input_buffer/sizeof(int);
 
   // 1st item is generated 10% of the times
-  zipf_setup(parsedData.CONFL_SPACE, 0.4);
+  zipf_setup(parsedData.CONFL_SPACE, 0.6);
 
   unsigned rnd;
   for (int i = 0; i < good_buffers_last; ++i) {

@@ -47,7 +47,7 @@ __global__ void test_kernel(PR_globalKernelArgs)
 void LaunchTestKernel(void *argsPtr)
 {
   pr_buffer_s inBuf, outBuf;
-  CUDA_CHECK_ERROR(cudaThreadSynchronize(), ""); // sync the previous run
+  CUDA_CHECK_ERROR(cudaDeviceSynchronize(), ""); // sync the previous run
 
   cudaFuncSetCacheConfig(test_kernel, cudaFuncCachePreferL1);
 

@@ -355,7 +355,15 @@ static int transfer(account_t *accounts, volatile unsigned *positions, int count
     load2 = TM_LOAD(&accounts[dst]);
     load2 += COMPUTE_TRANSFER(amount);
   }
-	TM_STORE(&accounts[src], load1); // TODO: now is 2 reads 1 write
+
+	// TODO: store must be controlled with parsedData.access_controller
+	// -----------------
+
+	// int writeAccountIdx = src;
+	int halfAccounts = parsedData.nb_accounts / 2;
+	int writeAccountIdx = (src - halfAccounts) / parsedData.access_controller + halfAccounts;
+
+	TM_STORE(&accounts[writeAccountIdx], load1); // TODO: now is 2 reads 1 write
 	// TM_STORE(&accounts[dst], load2);
 
   TM_COMMIT;
@@ -567,7 +575,7 @@ static void test(int id, void *data)
 	volatile int spin = 0;
 	int randomBackoff = RAND_R_FNC(seed) % parsedData.CPU_backoff;
 	while (spin++ < randomBackoff);
-	
+
 	asm volatile ("" ::: "memory");
 
   d->nb_transfer++;
@@ -651,12 +659,12 @@ static void test_cuda(int id, void *data)
   account_t *accounts = d->bank->accounts;
   size_t bank_size = d->bank->size;
 
-#if HETM_CPU_EN == 0
-	// with GPU only, CPU samples some data between batches
-	for (int i = 0; i < bank_size; ++i) {
-		bank_cpu_sample_data += accounts[i];
-	}
-#endif /* HETM_CPU_EN == 0 */
+// #if HETM_CPU_EN == 0
+// 	// with GPU only, CPU samples some data between batches
+// 	for (int i = 0; i < bank_size; ++i) {
+// 		bank_cpu_sample_data += accounts[i];
+// 	}
+// #endif /* HETM_CPU_EN == 0 */
 
   jobWithCuda_run(cd, accounts);
 }
