@@ -71,6 +71,11 @@ CFLAGS   += $(DEBUG_FLAGS)
 CXXFLAGS += $(DEBUG_FLAGS)
 NVFLAGS  += $(NV_DEB_FLAGS)
 endif
+ifneq ($(CFG),debug)
+CFLAGS   += -DNDEBUG
+CXXFLAGS += -DNDEBUG
+NVFLAGS  += -DNDEBUG
+endif
 ifeq ($(CFG),deb_cpu_only)
 CFLAGS   += $(DEBUG_FLAGS)
 CXXFLAGS += $(DEBUG_FLAGS)
@@ -106,6 +111,7 @@ $(LIB): $(OBJS)
 	### TODO: any optimization level blocks for VERS --> TODO: do optimization for BMAP
 	$(NVCC) $(NVFLAGS) -O2 -o $(SRC)/hetm-threading-cpu.o $(SRC)/hetm-threading-cpu.cu
 	$(CXX) $(CXXFLAGS) -O2 -o $(SRC)/hetm-producer-consumer.o $(SRC)/hetm-producer-consumer.cpp
+	$(CXX) $(CXXFLAGS) -O2 -o $(SRC)/hetm-log.o $(SRC)/hetm-log.cpp
 	$(AR) $@ $(OBJS)
 
 %.o:	%.c

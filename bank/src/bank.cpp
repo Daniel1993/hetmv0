@@ -153,7 +153,7 @@ static int fill_GPU_input_buffers()
 		}
 		cpu_ptr[i] = rnd % parsedData.nb_accounts + 1;
 	}
-#else /* BANK_PART == 5 GPU workload with tunnable intra-conflicts */
+#elif BANK_PART == 5 /* BANK_PART == 5 GPU workload with tunnable intra-conflicts */
 	// TODO: I should use more input buffers: some caching effects may show up
 	unsigned rnd = RAND_R_FNC(input_seed);
 	for (int i = 0; i < buffer_last; ++i) {
@@ -178,8 +178,46 @@ static int fill_GPU_input_buffers()
 		cpu_ptr[i] = INTERSECT_ACCESS_GPU(rnd, parsedData.nb_accounts-40);
 		if (cnfl_rnd % 100 >= BANK_INTRA_CONFL*100) {
 			// no conflict
-			rnd += parsedData.read_intensive_size;
+			rnd += parsedData.read_intensive_size + 1;
 		}
+	}
+#elif BANK_PART == 6 /* BANK_PART == 6 contiguous */
+	unsigned rnd = 0;
+	for (int i = 0; i < buffer_last; ++i) {
+		cpu_ptr[i] = GPU_ACCESS(rnd, parsedData.nb_accounts-40);
+		rnd += parsedData.read_intensive_size + 1;
+	}
+
+	memman_select("GPU_input_buffer_bad");
+	cpu_ptr = (int*)memman_get_cpu(NULL);
+
+	rnd = 0;
+	for (int i = 0; i < buffer_last; ++i) {
+		if (i % 128 == 0) {
+			cpu_ptr[i] = 0; // deterministic intersection
+			continue;
+		}
+		cpu_ptr[i] = INTERSECT_ACCESS_GPU(rnd, parsedData.nb_accounts-40);
+		rnd += parsedData.read_intensive_size + 1;
+	}
+#elif BANK_PART == 7 || BANK_PART == 8 /* not used on CPU, GPU blocks */
+	unsigned rnd = RAND_R_FNC(input_seed);
+	for (int i = 0; i < buffer_last; ++i) {
+		cpu_ptr[i] = GPU_ACCESS(rnd, parsedData.nb_accounts-40);
+		rnd = RAND_R_FNC(input_seed);
+	}
+
+	memman_select("GPU_input_buffer_bad");
+	cpu_ptr = (int*)memman_get_cpu(NULL);
+
+	rnd = RAND_R_FNC(input_seed);
+	for (int i = 0; i < buffer_last; ++i) {
+		if (i % 128 == 0) {
+			cpu_ptr[i] = 0; // deterministic intersection
+			continue;
+		}
+		cpu_ptr[i] = INTERSECT_ACCESS_GPU(rnd, parsedData.nb_accounts-40);
+		rnd = RAND_R_FNC(input_seed);
 	}
 #endif /* BANK_PART == 1 */
 }
@@ -272,7 +310,7 @@ static int fill_CPU_input_buffers()
 		CPUInputBuffer[i] = INTERSECT_ACCESS_CPU(parsedData.nb_accounts - rnd, parsedData.nb_accounts-40);
 		// CPUInputBuffer[i] |= 1;
 	}
-#else /* BANK_PART == 5 GPU workload with tunnable intra-conflicts */
+#elif BANK_PART == 5 /* BANK_PART == 5 GPU workload with tunnable intra-conflicts */
 	unsigned reset_rnd = RAND_R_FNC(input_seed);
 	unsigned rnd = reset_rnd;
 	for (int i = 0; i < good_buffers_last; ++i) {
@@ -304,6 +342,38 @@ static int fill_CPU_input_buffers()
 			rnd += parsedData.read_intensive_size + 1;
 		}
 	}
+#elif BANK_PART == 6 /* BANK_PART == 6 contiguous */
+	unsigned rnd = 0;
+	for (int i = 0; i < good_buffers_last; ++i) {
+		CPUInputBuffer[i] = CPU_ACCESS(rnd, parsedData.nb_accounts-40);
+		rnd += parsedData.read_intensive_size + 5;
+	}
+
+	rnd = 0;
+	for (int i = good_buffers_last; i < bad_buffers_last; ++i) {
+		if (i % 128 == 0) {
+			CPUInputBuffer[i] = 0; // deterministic intersection
+			continue;
+		}
+		CPUInputBuffer[i] = INTERSECT_ACCESS_CPU(i, parsedData.nb_accounts-40);
+		rnd += parsedData.read_intensive_size + 5;
+	}
+#elif BANK_PART == 7 || BANK_PART == 8 /* random on GPU contiguous on CPU */
+	unsigned rnd = 0;
+	for (int i = 0; i < good_buffers_last; ++i) {
+		CPUInputBuffer[i] = CPU_ACCESS(rnd, parsedData.nb_accounts-40);
+		rnd += parsedData.read_intensive_size + 16;
+	}
+
+	rnd = 0;
+	for (int i = good_buffers_last; i < bad_buffers_last; ++i) {
+		if (i % 128 == 0) {
+			CPUInputBuffer[i] = 0; // deterministic intersection
+			continue;
+		}
+		CPUInputBuffer[i] = INTERSECT_ACCESS_CPU(i, parsedData.nb_accounts-40);
+		rnd += parsedData.read_intensive_size + 16;
+	}
 #endif /* BANK_PART */
 }
 
@@ -334,38 +404,76 @@ static int transfer(account_t *accounts, volatile unsigned *positions, int count
   volatile int i;
 	uintptr_t load1, load2;
   int z = 0;
-  int n, src, dst;
+  int n;
+	void *src;
+	void *dst;
+	void *pos[count];
+	void *pos_write;
 
-	for (n = 1; n < count; n += 2) {
-		__builtin_prefetch(&accounts[positions[n]], 1, 1);
-		__builtin_prefetch(&accounts[positions[n+1]], 0, 0);
+#if BANK_PART == 7
+	pos_write = &accounts[HeTM_thread_data->id * 16];
+	asm volatile("" ::: "memory");
+#elif BANK_PART == 8
+	static thread_local unsigned local_seed = (0x1234 << 10) + HeTM_thread_data->id;
+	unsigned rnd = RAND_R_FNC(local_seed);
+	unsigned partionSize = parsedData.nb_accounts / parsedData.nb_threadsCPU;
+	unsigned rnd_pos = (rnd % partionSize) * HeTM_thread_data->id;
+	rnd_pos = rnd_pos / parsedData.access_controller;
+	pos_write = &accounts[rnd_pos];
+#else
+	for (n = 0; n < count; n += 2) {
+		pos[n] = &accounts[positions[n]];
+		pos[n+1] = &accounts[positions[n+1]];
+		__builtin_prefetch(pos[n], 0, 0);
+		__builtin_prefetch(pos[n+1], 0, 0);
+		// printf("prefetch %i and %i\n", positions[n], positions[n+1]);
 	}
+	// int writeAccountIdx = src;
+	int halfAccounts = parsedData.nb_accounts / 2;
+	int writeAccountIdx = (positions[0] - halfAccounts) / parsedData.access_controller + halfAccounts;
+	pos_write = &accounts[writeAccountIdx];
+
+#endif /* BANK_PART == 7 */
 
   /* Allow overdrafts */
   TM_START(z, RW);
-
+#if BANK_PART == 7 || BANK_PART == 8
+	TM_STORE((int*)pos_write, 1234);
+	// TM_STORE((int*)pos_write + 1, 1234);
+	// TM_STORE((int*)pos_write + 2, 1234);
+	// TM_STORE((int*)pos_write + 3, 1234);
+	// TM_STORE((int*)pos_write + 4, 1234);
+	// TM_STORE((int*)pos_write + 5, 1234);
+	// TM_STORE((int*)pos_write + 6, 1234);
+	// TM_STORE((int*)pos_write + 7, 1234);
+	// TM_STORE((int*)pos_write + 8, 1234);
+	// TM_STORE((int*)pos_write + 9, 1234);
+	// TM_STORE((int*)pos_write + 10, 1234);
+	// TM_STORE((int*)pos_write + 11, 1234);
+	// TM_STORE((int*)pos_write + 12, 1234);
+	// TM_STORE((int*)pos_write + 13, 1234);
+	// TM_STORE((int*)pos_write + 14, 1234);
+	// TM_STORE((int*)pos_write + 15, 1234);
+#else
   for (n = 0; n < count; n += 2) {
-    src = positions[n];
-    dst = positions[n+1];
+    src = pos[n];
+    dst = pos[n+1];
 
 		// Problem: TinySTM works with the granularity of 8B, PR-STM works with 4B
-    load1 = TM_LOAD(&accounts[src]);
+    load1 = TM_LOAD(src);
     load1 -= COMPUTE_TRANSFER(amount);
 
-    load2 = TM_LOAD(&accounts[dst]);
+    load2 = TM_LOAD(dst);
     load2 += COMPUTE_TRANSFER(amount);
   }
 
 	// TODO: store must be controlled with parsedData.access_controller
 	// -----------------
 
-	// int writeAccountIdx = src;
-	int halfAccounts = parsedData.nb_accounts / 2;
-	int writeAccountIdx = (src - halfAccounts) / parsedData.access_controller + halfAccounts;
-
-	TM_STORE(&accounts[writeAccountIdx], load1); // TODO: now is 2 reads 1 write
+	TM_STORE(pos_write, load1); // TODO: now is 2 reads 1 write
 	// TM_STORE(&accounts[dst], load2);
 
+#endif /* BANK_PART != 7 */
   TM_COMMIT;
 
   // TODO: remove this
@@ -532,8 +640,9 @@ static void test(int id, void *data)
 		/* ** READ_INTENSIVE BRANCH (-R > 0) ** */
 		// BANK_PREPARE_READ_INTENSIVE(d->id, d->seed, rnd, d->hmult, d->nb_threads, accounts_vec, nb_accounts);
 		// TODO: change the buffers
-		for (int i = 1; i < d->read_intensive_size; ++i)
-			accounts_vec[i] = accounts_vec[i-1] + 2; // only odd accounts
+		for (int i = 1; i < d->read_intensive_size; ++i) {
+			accounts_vec[i] = accounts_vec[i-1]+1;
+		}
 
 		if (rndOpt2 % 100 < d->prec_write_txs) {
 			// 1% readIntensive
@@ -544,8 +653,9 @@ static void test(int id, void *data)
 	} else {
 		/* ** READ_INTENSIVE BRANCH (current in use with -R 0) ** */
 		// BANK_PREPARE_TRANSFER(d->id, d->seed, rnd, d->hmult, d->nb_threads, accounts_vec, nb_accounts);
-		for (int i = 1; i < d->read_intensive_size; ++i)
-			accounts_vec[i] = accounts_vec[i-1] + 2; // only odd accounts
+		for (int i = 1; i < d->read_intensive_size; ++i) {
+			accounts_vec[i] = accounts_vec[i-1]+1;
+		}
 		// for (int i = 1; i < d->trfs*2; ++i)
 		// 	accounts_vec[i] = accounts_vec[i-1] + parsedData.access_offset;
 #if BANK_PART == 5
@@ -610,27 +720,28 @@ static void before_batch(int id, void *data)
 	} else {
 		memman_select("GPU_input_buffer_good");
 	}
-	memman_cpy_to_gpu(NULL, NULL);
+	memman_cpy_to_gpu(NULL, NULL, *hetm_batchCount);
 }
 
 static void after_batch(int id, void *data)
 {
 	memman_select("GPU_output_buffer");
-	memman_cpy_to_cpu(NULL, NULL);
+	memman_cpy_to_cpu(NULL, NULL, *hetm_batchCount);
 	// TODO: conflict mechanism
 }
 
 static void choose_policy(int, void*) {
   // -----------------------------------------------------------------------
   int idGPUThread = HeTM_shared_data.nbCPUThreads;
-  long TXsOnCPU = 0,
-		TXsOnGPU = parsedData.GPUthreadNum*parsedData.GPUblockNum*parsedData.trans;
-  for (int i = 0; i < HeTM_shared_data.nbCPUThreads; ++i) {
-    TXsOnCPU += HeTM_shared_data.threadsInfo[i].curNbTxs;
-  }
+  // long TXsOnCPU = 0;
+	long TXsOnGPU = parsedData.GPUthreadNum*parsedData.GPUblockNum*parsedData.trans;
+  // for (int i = 0; i < HeTM_shared_data.nbCPUThreads; ++i) {
+  //   TXsOnCPU += HeTM_shared_data.threadsInfo[i].curNbTxs;
+  // }
 
   // TODO: this picks the one with higher number of TXs
 	// TODO: GPU only gets the stats in the end --> need to remove the dropped TXs
+#if BANK_PART != 7 && BANK_PART != 8
 	HeTM_stats_data.nbTxsGPU += TXsOnGPU;
 
 	if (HeTM_shared_data.policy == HETM_GPU_INV) {
@@ -642,6 +753,7 @@ static void choose_policy(int, void*) {
 	} else if (HeTM_shared_data.policy == HETM_CPU_INV) {
 		HeTM_stats_data.nbCommittedTxsGPU += TXsOnGPU;
 	}
+#endif /* BANK_PART != 7 */
 
 	// can only choose the policy for the next round
   // if (TXsOnCPU > TXsOnGPU) {
@@ -665,6 +777,16 @@ static void test_cuda(int id, void *data)
 // 		bank_cpu_sample_data += accounts[i];
 // 	}
 // #endif /* HETM_CPU_EN == 0 */
+
+#if BANK_PART == 7 || BANK_PART == 8
+	// makes the batch artificially longer
+	struct timespec timeout = {
+		.tv_sec = parsedData.GPU_batch_duration / 1000,
+		.tv_nsec = (parsedData.GPU_batch_duration * 1000000) % 1000000000 // in millis
+	};
+	nanosleep(&timeout, NULL);
+	// NOTE: Wait time must come before (kernel sets some flags for the waiting)
+#endif /* BANK_PART == 7 */
 
   jobWithCuda_run(cd, accounts);
 }

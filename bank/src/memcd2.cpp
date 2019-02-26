@@ -367,13 +367,13 @@ static void before_batch(int id, void *data)
 	} else {
 		memman_select("GPU_input_buffer_good");
 	}
-	memman_cpy_to_gpu(NULL, NULL);
+	memman_cpy_to_gpu(NULL, NULL, *hetm_batchCount);
 }
 
 static void after_batch(int id, void *data)
 {
 	memman_select("GPU_output_buffer");
-	memman_cpy_to_cpu(NULL, NULL);
+	memman_cpy_to_cpu(NULL, NULL, *hetm_batchCount);
 	// TODO: conflict mechanism
 }
 
@@ -411,7 +411,7 @@ static void test_cuda(int id, void *data)
 
 	*(d->memcd->globalTs) += 1;
 	memman_select("memcd_global_ts");
-	memman_cpy_to_gpu(NULL, NULL);
+	memman_cpy_to_gpu(NULL, NULL, *hetm_batchCount);
 
   jobWithCuda_runMemcd(d, cd, base_ptr, *(d->memcd->globalTs));
 }

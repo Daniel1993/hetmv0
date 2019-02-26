@@ -602,7 +602,7 @@ static void before_batch(int id, void *data)
 static void after_batch(int id, void *data)
 {
 	memman_select("GPU_output_buffer");
-	memman_cpy_to_cpu(NULL, NULL);
+	memman_cpy_to_cpu(NULL, NULL, *hetm_batchCount);
 	// TODO: conflict mechanism
 }
 
@@ -673,7 +673,7 @@ static void test_cuda(int id, void *data)
 		} else {
 			memman_select("GPU_input_buffer_good2"); // GPU input buffer
 		}
-		memman_cpy_to_gpu(NULL, NULL);
+		memman_cpy_to_gpu(NULL, NULL, *hetm_batchCount);
 	}
 
 	if (isGPUBatchSteal /*&& startInputPtr[SHARED_QUEUE] + NB_GPU_TXS <= endInputPtr[SHARED_QUEUE]*/) {
@@ -692,7 +692,7 @@ static void test_cuda(int id, void *data)
 		} else {
 			memman_select("GPU_input_buffer_bad2"); // shared input buffer (sorry for the naming
 		}
-		memman_cpy_to_gpu(NULL, NULL);
+		memman_cpy_to_gpu(NULL, NULL, *hetm_batchCount);
 	}
 
 	// if (!gotTXs) {
@@ -726,7 +726,7 @@ static void test_cuda(int id, void *data)
 	} else {
 
 		memman_select("memcd_global_ts");
-		memman_cpy_to_gpu(NULL, NULL);
+		memman_cpy_to_gpu(NULL, NULL, *hetm_batchCount);
 
 		jobWithCuda_runMemcd(d, cd, base_ptr, *(d->memcd->globalTs));
 	}

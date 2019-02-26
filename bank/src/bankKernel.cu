@@ -309,10 +309,24 @@ __device__ void update_tx(PR_txCallDefArgs, int txCount)
 	if (nbRetries++ > maxNbRetries) break;
 #endif
 
+	// TODO: store must be controlled with parsedData.access_controller
+	// -----------------
+
+	target = 0;
+	// int writeAccountIdx = idx[target];
+	writeAccountIdx = (unsigned)((double)idx[target] / (double)access_controller);
+
+	// must read the write
+	#ifndef BANK_DISABLE_PRSTM
+			count_amount += PR_read(accounts + writeAccountIdx);
+	#else /* PR-STM disabled */
+			count_amount += accounts[writeAccountIdx];
+	#endif
+
 	// reads the accounts first, then mutates the locations
 	#pragma unroll
 	for (j = 0; j < read_intensive_size; j++)	{
-		readAccountIdx = idx[j] / access_controller;
+		readAccountIdx = idx[j];
 		if (readAccountIdx >= nbAccounts) {
 			break;
 		}
@@ -332,12 +346,6 @@ __device__ void update_tx(PR_txCallDefArgs, int txCount)
 		}
 		// nval = COMPUTE_TRANSFER(reads[target] - 1); // -money
 		nval = COMPUTE_TRANSFER(count_amount - 1); // -money
-
-			// TODO: store must be controlled with parsedData.access_controller
-		// -----------------
-
-		// int writeAccountIdx = idx[target];
-		writeAccountIdx = (unsigned)((double)idx[target] / (double)access_controller);
 
 		// nbAccounts / devParsedData.access_controller
 		if (writeAccountIdx < nbAccounts) {
@@ -431,6 +439,11 @@ __device__ void updateReadOnly_tx(PR_txCallDefArgs, int txCount)
 __global__ void bankTx(PR_globalKernelArgs)
 {
 	int tid = PR_THREAD_IDX;
+
+#if BANK_PART == 7 || BANK_PART == 8
+	return;
+#endif /* BANK_PART == 7 */
+
 	PR_enterKernel(tid);
 
 	int i = 0; //how many transactions one thread need to commit

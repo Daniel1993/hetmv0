@@ -102,7 +102,7 @@ int HeTM_get_inter_confl_flag(void *stream) {
     return 1;
   }
   memman_select("HeTM_interConflFlag");
-  memman_cpy_to_cpu(stream, NULL);
+  memman_cpy_to_cpu(stream, NULL, *hetm_batchCount);
   cudaStreamSynchronize((cudaStream_t)stream);
   return *HeTM_shared_data.hostInterConflFlag;
 }

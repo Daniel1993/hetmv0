@@ -219,6 +219,7 @@ struct thread_data {
 	int access_offset;
 
 	long CPU_backoff;
+	long GPU_batch_duration;
 
 	double GPU_steal_prob;
 	double CPU_steal_prob;

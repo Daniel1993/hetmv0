@@ -435,13 +435,13 @@ static void before_batch(int id, void *data)
 	} else {
 		memman_select("GPU_input_buffer_good");
 	}
-	memman_cpy_to_gpu(NULL, NULL);
+	memman_cpy_to_gpu(NULL, NULL, *hetm_batchCount);
 }
 
 static void after_batch(int id, void *data)
 {
 	memman_select("GPU_output_buffer");
-	memman_cpy_to_cpu(NULL, NULL);
+	memman_cpy_to_cpu(NULL, NULL, *hetm_batchCount);
 	// TODO: conflict mechanism
 }
 

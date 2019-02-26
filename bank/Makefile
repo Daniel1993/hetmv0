@@ -77,6 +77,11 @@ CFLAGS   += $(DEBUG_FLAGS)
 CXXFLAGS += $(DEBUG_FLAGS)
 NVFLAGS  += $(NV_DEB_FLAGS)
 endif
+ifneq ($(CFG),debug)
+CFLAGS   += -DNDEBUG
+CXXFLAGS += -DNDEBUG
+NVFLAGS  += -DNDEBUG
+endif
 
 SRC        := $(CURR_DIR)/src
 BANK_OBJS  := \
@@ -172,11 +177,12 @@ $(APP): $(OBJS)
 		INST_CPU=$(INST_CPU) \
 		USE_UNIF_MEM=$(USE_UNIF_MEM) \
 		HETM_DISABLE_CHUNKS=$(DHETM_DISABLE_CHUNKS) \
-		PRINT_DEB=$(PRINT_DEB)
+		PRINT_DEB=$(PRINT_DEB) \
+		LOG_SIZE=$(LOG_SIZE) \
+		STM_LOG_BUFFER_SIZE=$(STM_LOG_BUFFER_SIZE)
 	@echo "Linking..."
 	### TODO: optimization breaks performance
 	$(CXX) $(CXXFLAGS) -O3 -o $(SRC)/bank.o $(SRC)/bank.cpp
-	#$(CXX) $(CXXFLAGS) -O1 -o $(SRC)/memcd2.o $(SRC)/memcd2.cpp
 	$(NVCC) $(LDFLAGS) -o $@ $(OBJS)
 
 %.o:	%.c

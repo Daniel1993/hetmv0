@@ -99,7 +99,7 @@ cudaError_t queue_Init(queue_t *q, cuda_t *cd, int shared_rate, int q_size, long
 	}
 	//Copy to host
   memman_select("memcd_cpu_queue");
-  memman_cpy_to_cpu(NULL, NULL);
+  memman_cpy_to_cpu(NULL, NULL, *hetm_batchCount);
   CUDA_CHECK_ERROR(cudaDeviceSynchronize(), ""); // waits copy back
   cd->gpu_queue = temp_q; // TODO:
 
@@ -115,7 +115,7 @@ cudaError_t queue_Init(queue_t *q, cuda_t *cd, int shared_rate, int q_size, long
 		printf("queue_generate_kernel failed!");
 	}
   memman_select("memcd_shared_queue");
-  memman_cpy_to_cpu(NULL, NULL);
+  memman_cpy_to_cpu(NULL, NULL, *hetm_batchCount);
   CUDA_CHECK_ERROR(cudaDeviceSynchronize(), "");
 
 	/*
@@ -130,7 +130,7 @@ cudaError_t queue_Init(queue_t *q, cuda_t *cd, int shared_rate, int q_size, long
 		printf("queue_generate_kernel failed!");
 	}
   memman_select("memcd_gpu_queue");
-  memman_cpy_to_cpu(NULL, NULL);
+  memman_cpy_to_cpu(NULL, NULL, *hetm_batchCount);
   CUDA_CHECK_ERROR(cudaDeviceSynchronize(), "");
 
 	// cudaFree(temp_q); // TODO: temp_q is freed?

@@ -223,7 +223,7 @@ function doRun_GPUonly {
 			GPU_STEAL_PROB=0 CPU_STEAL_PROB=0 \
 			NB_CONFL_GPU_BUFFER=$NB_CONFL_GPU_BUFFER \
 			NB_CONFL_CPU_BUFFER=$NB_CONFL_CPU_BUFFER CONFL_SPACE=$CONFL_SPACE
-		tail -N 0.1 Bank.csv > /tmp/BankLastLine.csv
+		tail -n 1 Bank.csv > /tmp/BankLastLine.csv
 		cat /tmp/BankLastLine.csv >> Bank.csv # duplicates last line
 		mv Bank.csv ${1}_s${s}
 	done
@@ -240,7 +240,7 @@ function doRun_CPUonly {
 			GPU_STEAL_PROB=0 CPU_STEAL_PROB=0 \
 			NB_CONFL_GPU_BUFFER=$NB_CONFL_GPU_BUFFER \
 			NB_CONFL_CPU_BUFFER=$NB_CONFL_CPU_BUFFER CONFL_SPACE=$CONFL_SPACE
-		tail -N 0.1 Bank.csv > /tmp/BankLastLine.csv
+		tail -n 1 Bank.csv > /tmp/BankLastLine.csv
 		cat /tmp/BankLastLine.csv >> Bank.csv # duplicates last line
 		mv Bank.csv ${1}_s${s}
 	done
@@ -277,11 +277,11 @@ CPU_INPUT="CPU_input_${SIZE_ZIPF}_099_1310720.txt"
 GPU_BLOCKS=128
 GPU_THREADS=128
 # GPU_THREADS=256
-doRun_HeTM_SHARED_steal memcd_SHARED_steal_VERS_LARGE_B_64k VERS
+# doRun_HeTM_SHARED_steal memcd_SHARED_steal_VERS_LARGE_B_64k VERS
 doRun_HeTM_SHARED_steal memcd_SHARED_steal_BMAP_LARGE_B_64k BMAP
 
-doRun_GPUonly memcd_GPUonly_LARGE_B_64k
-doRun_CPUonly memcd_CPUonly_LARGE_B_64k
+# doRun_GPUonly memcd_GPUonly_LARGE_B_64k
+# doRun_CPUonly memcd_CPUonly_LARGE_B_64k
 
 # ### 128 k
 #
@@ -299,11 +299,11 @@ doRun_CPUonly memcd_CPUonly_LARGE_B_64k
 GPU_BLOCKS=256
 GPU_THREADS=256
 # GPU_THREADS=256
-doRun_HeTM_SHARED_steal memcd_SHARED_steal_VERS_LARGE_B_256k VERS
+# doRun_HeTM_SHARED_steal memcd_SHARED_steal_VERS_LARGE_B_256k VERS
 doRun_HeTM_SHARED_steal memcd_SHARED_steal_BMAP_LARGE_B_256k BMAP
 
-doRun_GPUonly memcd_GPUonly_LARGE_B_256k
-doRun_CPUonly memcd_CPUonly_LARGE_B_256k
+# doRun_GPUonly memcd_GPUonly_LARGE_B_256k
+# doRun_CPUonly memcd_CPUonly_LARGE_B_256k
 
 # ### 512 k
 #
@@ -321,11 +321,11 @@ doRun_CPUonly memcd_CPUonly_LARGE_B_256k
 GPU_BLOCKS=512
 GPU_THREADS=512
 # GPU_THREADS=256
-doRun_HeTM_SHARED_steal memcd_SHARED_steal_VERS_LARGE_B_1M VERS
+# doRun_HeTM_SHARED_steal memcd_SHARED_steal_VERS_LARGE_B_1M VERS
 doRun_HeTM_SHARED_steal memcd_SHARED_steal_BMAP_LARGE_B_1M BMAP
 
-doRun_GPUonly memcd_GPUonly_LARGE_B_1M
-doRun_CPUonly memcd_CPUonly_LARGE_B_1M
+# doRun_GPUonly memcd_GPUonly_LARGE_B_1M
+# doRun_CPUonly memcd_CPUonly_LARGE_B_1M
 
 
 # GPU_THREADS=512
@@ -357,11 +357,11 @@ CPU_INPUT="CPU_input_${SIZE_ZIPF}_099_1310720.txt"
 GPU_THREADS=128
 GPU_BLOCKS=128
 # GPU_THREADS=256
-doRun_HeTM_SHARED_steal memcd_SHARED_steal_VERS_SMALL_B_64k VERS
+# doRun_HeTM_SHARED_steal memcd_SHARED_steal_VERS_SMALL_B_64k VERS
 doRun_HeTM_SHARED_steal memcd_SHARED_steal_BMAP_SMALL_B_64k BMAP
 
-doRun_GPUonly memcd_GPUonly_SMALL_B_64k
-doRun_CPUonly memcd_CPUonly_SMALL_B_64k
+# doRun_GPUonly memcd_GPUonly_SMALL_B_64k
+# doRun_CPUonly memcd_CPUonly_SMALL_B_64k
 #
 # ### 128 k
 #
@@ -379,11 +379,11 @@ doRun_CPUonly memcd_CPUonly_SMALL_B_64k
 GPU_THREADS=256
 GPU_BLOCKS=256
 # GPU_THREADS=256
+# doRun_HeTM_SHARED_steal memcd_SHARED_steal_VERS_SMALL_B_256k VERS
 doRun_HeTM_SHARED_steal memcd_SHARED_steal_BMAP_SMALL_B_256k BMAP
-doRun_HeTM_SHARED_steal memcd_SHARED_steal_VERS_SMALL_B_256k VERS
 
-doRun_GPUonly memcd_GPUonly_SMALL_B_256k
-doRun_CPUonly memcd_CPUonly_SMALL_B_256k
+# doRun_GPUonly memcd_GPUonly_SMALL_B_256k
+# doRun_CPUonly memcd_CPUonly_SMALL_B_256k
 
 # ### 512 k
 #
@@ -401,8 +401,8 @@ doRun_CPUonly memcd_CPUonly_SMALL_B_256k
 GPU_THREADS=512
 GPU_BLOCKS=256
 # GPU_THREADS=256
-doRun_HeTM_SHARED_steal memcd_SHARED_steal_VERS_SMALL_B_1M VERS
+# doRun_HeTM_SHARED_steal memcd_SHARED_steal_VERS_SMALL_B_1M VERS
 doRun_HeTM_SHARED_steal memcd_SHARED_steal_BMAP_SMALL_B_1M BMAP
 
-doRun_GPUonly memcd_GPUonly_SMALL_B_1M
-doRun_CPUonly memcd_CPUonly_SMALL_B_1M
+# doRun_GPUonly memcd_GPUonly_SMALL_B_1M
+# doRun_CPUonly memcd_CPUonly_SMALL_B_1M

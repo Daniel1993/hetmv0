@@ -221,6 +221,11 @@ void bank_parseArgs(int argc, char **argv, thread_data_t *data)
     data->CPU_backoff = input_getLong("CPU_BACKOFF");
   }
 
+  data->GPU_batch_duration = 100;
+  if (input_exists("BATCH_DURATION")) {
+    data->GPU_batch_duration = input_getLong("BATCH_DURATION");
+  }
+
   data->CPU_steal_prob = 0;
   if (input_exists("CPU_STEAL_PROB")) {
     data->CPU_steal_prob = input_getDouble("CPU_STEAL_PROB");

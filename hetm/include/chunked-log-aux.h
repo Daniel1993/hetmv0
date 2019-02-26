@@ -19,7 +19,7 @@
  */
 #define CHUNKED_LOG_EXTEND(log, node) ({ \
   (node)->next = (node)->prev = NULL; \
-  if ((log)->last == NULL) { \
+  if ((log)->first == NULL || (log)->last == NULL) { \
     (log)->first = (log)->curr = (log)->last = node; \
     (log)->size = 1; \
     (log)->pos = 0; \
@@ -31,29 +31,23 @@
   } \
 })
 
-#define CHUNKED_LOG_REMOVE_FRONT(log, newFirst) ({ \
-  chunked_log_node_s *node = newFirst; \
+#define CHUNKED_LOG_REMOVE_FRONT(log) ({ \
   if ((log)->first == (log)->last) { \
     (log)->last = (log)->first = NULL; \
     (log)->size = 0; \
-  } else if (node != NULL) { \
-    (log)->first = node; \
-    (log)->first->prev = NULL; \
+  } else { \
+    (log)->first->next->prev = NULL; \
+    (log)->first = (log)->first->next; \
   } \
-  node; \
 })
 
 // in case of warp --> i > chunked_log_free_ptr + SIZE_OF_FREE_NODES
 #define CHUNKED_LOG_FIND_FREE(sizeNode, nbBuckets) ({ \
   chunked_log_node_s *res_ = NULL; \
-  /*unsigned long i = __sync_fetch_and_add(&chunked_log_alloc_r_ptr, 1);*/ \
-  unsigned long i = chunked_log_alloc_ptr++; \
-  if (i < chunked_log_free_ptr || i > chunked_log_free_ptr + SIZE_OF_FREE_NODES) { \
+  unsigned long i = chunked_log_alloc_ptr; \
+  if (i < chunked_log_free_ptr) { \
     res_ = chunked_log_node_recycled[i % SIZE_OF_FREE_NODES]; /* barrier needed? */ \
-    /*__sync_fetch_and_add(&chunked_log_alloc_ptr, 1);*/ \
-  } else { \
-    /*__sync_fetch_and_sub(&chunked_log_alloc_r_ptr, 1);*/ \
-    chunked_log_alloc_ptr -= 1; \
+    chunked_log_alloc_ptr++; \
   } \
   res_; \
 })

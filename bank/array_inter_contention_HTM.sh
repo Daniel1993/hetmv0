@@ -14,7 +14,7 @@ DURATION=20000
 BLOCKS="2 4 8 16 32 64 256 512 1024" # 512
 THREADS="512" #"2 4 8 16 32 64 96 256 320 512 640 768 1024"
 BATCH_SIZE="4"
-SAMPLES=2
+SAMPLES=5
 #./makeTM.sh
 
 CPU_THREADS=4
@@ -22,6 +22,8 @@ LOW_CPU_THREADS=10
 HIGH_CPU_THREADS=20
 
 rm -f Bank.csv
+rm -f File1.csv
+rm -f File50.csv
 rm -f File10.csv
 rm -f File90.csv
 
@@ -34,51 +36,51 @@ SMALL_DATASET_P20=122000 #2621440 # 90 000 000 is the max for my home machine
 # sleep 2h
 
 function actualRun {
-	timeout 30s ./bank -n $CPU_THREADS -b 640 -x 256 -a $DATASET -d $DURATION \
+	timeout 40s ./bank -n $CPU_THREADS -b 640 -x 256 -a $DATASET -d $DURATION \
 		-R 0 -S 16 -l ${1} -N 1 -T 32 -f ${2} CPU_BACKOFF=180
 	if [ $? -ne 0 ]
 	then
-		timeout 30s ./bank -n $CPU_THREADS -b 640 -x 256 -a $DATASET -d $DURATION \
-		-R 0 -S 16 -l ${1} -N 1 -T 32 -f ${2} CPU_BACKOFF=180
-	fi
-	if [ $? -ne 0 ]
-	then
-		timeout 30s ./bank -n $CPU_THREADS -b 640 -x 256 -a $DATASET -d $DURATION \
+		timeout 40s ./bank -n $CPU_THREADS -b 640 -x 256 -a $DATASET -d $DURATION \
 		-R 0 -S 16 -l ${1} -N 1 -T 32 -f ${2} CPU_BACKOFF=180
 	fi
 	if [ $? -ne 0 ]
 	then
-		timeout 30s ./bank -n $CPU_THREADS -b 640 -x 256 -a $DATASET -d $DURATION \
+		timeout 40s ./bank -n $CPU_THREADS -b 640 -x 256 -a $DATASET -d $DURATION \
 		-R 0 -S 16 -l ${1} -N 1 -T 32 -f ${2} CPU_BACKOFF=180
 	fi
 	if [ $? -ne 0 ]
 	then
-		timeout 30s ./bank -n $CPU_THREADS -b 640 -x 256 -a $DATASET -d $DURATION \
+		timeout 40s ./bank -n $CPU_THREADS -b 640 -x 256 -a $DATASET -d $DURATION \
 		-R 0 -S 16 -l ${1} -N 1 -T 32 -f ${2} CPU_BACKOFF=180
 	fi
 	if [ $? -ne 0 ]
 	then
-		timeout 30s ./bank -n $CPU_THREADS -b 640 -x 256 -a $DATASET -d $DURATION \
+		timeout 40s ./bank -n $CPU_THREADS -b 640 -x 256 -a $DATASET -d $DURATION \
 		-R 0 -S 16 -l ${1} -N 1 -T 32 -f ${2} CPU_BACKOFF=180
 	fi
 	if [ $? -ne 0 ]
 	then
-		timeout 30s ./bank -n $CPU_THREADS -b 640 -x 256 -a $DATASET -d $DURATION \
+		timeout 40s ./bank -n $CPU_THREADS -b 640 -x 256 -a $DATASET -d $DURATION \
 		-R 0 -S 16 -l ${1} -N 1 -T 32 -f ${2} CPU_BACKOFF=180
 	fi
 	if [ $? -ne 0 ]
 	then
-		timeout 30s ./bank -n $CPU_THREADS -b 640 -x 256 -a $DATASET -d $DURATION \
+		timeout 40s ./bank -n $CPU_THREADS -b 640 -x 256 -a $DATASET -d $DURATION \
 		-R 0 -S 16 -l ${1} -N 1 -T 32 -f ${2} CPU_BACKOFF=180
 	fi
 	if [ $? -ne 0 ]
 	then
-		timeout 30s ./bank -n $CPU_THREADS -b 640 -x 256 -a $DATASET -d $DURATION \
+		timeout 40s ./bank -n $CPU_THREADS -b 640 -x 256 -a $DATASET -d $DURATION \
 		-R 0 -S 16 -l ${1} -N 1 -T 32 -f ${2} CPU_BACKOFF=180
 	fi
 	if [ $? -ne 0 ]
 	then
-		timeout 30s ./bank -n $CPU_THREADS -b 640 -x 256 -a $DATASET -d $DURATION \
+		timeout 40s ./bank -n $CPU_THREADS -b 640 -x 256 -a $DATASET -d $DURATION \
+		-R 0 -S 16 -l ${1} -N 1 -T 32 -f ${2} CPU_BACKOFF=180
+	fi
+	if [ $? -ne 0 ]
+	then
+		timeout 40s ./bank -n $CPU_THREADS -b 640 -x 256 -a $DATASET -d $DURATION \
 		-R 0 -S 16 -l ${1} -N 1 -T 32 -f ${2} CPU_BACKOFF=180
 	fi
 }
@@ -88,20 +90,35 @@ function doRunLargeDTST_GPUonly {
 	for s in `seq $SAMPLES`
 	do
 		make clean ; make CMP_TYPE=COMPRESSED USE_TSX_IMPL=1 CPUEn=0 PR_MAX_RWSET_SIZE=20 \
-			BANK_PART=${2} GPU_PART=0.55 CPU_PART=0.55 P_INTERSECT=0.00 PROFILE=1 -j 14 BANK_INTRA_CONFL=0.0
+			BANK_PART=${2} GPU_PART=0.55 CPU_PART=0.55 P_INTERSECT=0.00 PROFILE=1 -j 14 \
+			BANK_INTRA_CONFL=0.0 >/dev/null
 		actualRun 10 File10
 		actualRun 90 File90
-		# timeout 30s ./bank -n $CPU_THREADS -b 640 -x 256 -a $DATASET -d $DURATION -R 0 -S 16 -l 10 -N 1 -T 32 -f File10 CPU_BACKOFF=180
-		# timeout 30s ./bank -n $CPU_THREADS -b 640 -x 256 -a $DATASET -d $DURATION -R 0 -S 16 -l 90 -N 1 -T 32 -f File90 CPU_BACKOFF=180
+		# actualRun 1  File1
+		# actualRun 50 File50
+		# timeout 40s ./bank -n $CPU_THREADS -b 640 -x 256 -a $DATASET -d $DURATION -R 0 -S 16 -l 10 -N 1 -T 32 -f File10 CPU_BACKOFF=180
+		# timeout 40s ./bank -n $CPU_THREADS -b 640 -x 256 -a $DATASET -d $DURATION -R 0 -S 16 -l 90 -N 1 -T 32 -f File90 CPU_BACKOFF=180
 
 		# all the same point (no inter-confl with 1 device)
 		tail -n 1 File10.csv > /tmp/auxFile10.csv
 		tail -n 1 File90.csv > /tmp/auxFile90.csv
+		# tail -n 1 File1.csv  > /tmp/auxFile1.csv
+		# tail -n 1 File50.csv > /tmp/auxFile50.csv
+###
+		# cat /tmp/auxFile1.csv >> File1.csv
+		# cat /tmp/auxFile1.csv >> File1.csv
+		# cat /tmp/auxFile1.csv >> File1.csv
+		# cat /tmp/auxFile1.csv >> File1.csv
 ###
 		cat /tmp/auxFile10.csv >> File10.csv
 		cat /tmp/auxFile10.csv >> File10.csv
 		cat /tmp/auxFile10.csv >> File10.csv
 		cat /tmp/auxFile10.csv >> File10.csv
+###
+		# cat /tmp/auxFile50.csv >> File50.csv
+		# cat /tmp/auxFile50.csv >> File50.csv
+		# cat /tmp/auxFile50.csv >> File50.csv
+		# cat /tmp/auxFile50.csv >> File50.csv
 ###
 		cat /tmp/auxFile90.csv >> File90.csv
 		cat /tmp/auxFile90.csv >> File90.csv
@@ -110,6 +127,9 @@ function doRunLargeDTST_GPUonly {
 
 		mv File10.csv ${1}_10_s${s}
 		mv File90.csv ${1}_90_s${s}
+
+		# mv File1.csv ${1}_1_s${s}
+		# mv File50.csv ${1}_50_s${s}
 	done
 }
 
@@ -118,19 +138,34 @@ function doRunLargeDTST_CPUonly {
 	for s in `seq $SAMPLES`
 	do
 		make clean ; make INST_CPU=0 GPUEn=0 USE_TSX_IMPL=1 PR_MAX_RWSET_SIZE=20 \
-				BANK_PART=${2} GPU_PART=0.55 CPU_PART=0.55 P_INTERSECT=0.00 PROFILE=1 -j 14 BANK_INTRA_CONFL=0.0
+			BANK_PART=${2} GPU_PART=0.55 CPU_PART=0.55 P_INTERSECT=0.00 PROFILE=1 -j 14 \
+			BANK_INTRA_CONFL=0.0 >/dev/null
 		actualRun 10 File10
 		actualRun 90 File90
-		# timeout 30s ./bank -n $CPU_THREADS -b 640 -x 256 -a $DATASET -d $DURATION -R 0 -S 16 -l 10 -N 1 -T 32 -f File10 CPU_BACKOFF=180
-		# timeout 30s ./bank -n $CPU_THREADS -b 640 -x 256 -a $DATASET -d $DURATION -R 0 -S 16 -l 90 -N 1 -T 32 -f File90 CPU_BACKOFF=180
+		# actualRun 1 File1
+		# actualRun 50 File50
+		# timeout 40s ./bank -n $CPU_THREADS -b 640 -x 256 -a $DATASET -d $DURATION -R 0 -S 16 -l 10 -N 1 -T 32 -f File10 CPU_BACKOFF=180
+		# timeout 40s ./bank -n $CPU_THREADS -b 640 -x 256 -a $DATASET -d $DURATION -R 0 -S 16 -l 90 -N 1 -T 32 -f File90 CPU_BACKOFF=180
 		###
 		tail -n 1 File10.csv > /tmp/auxFile10.csv
 		tail -n 1 File90.csv > /tmp/auxFile90.csv
+		# tail -n 1 File1.csv  > /tmp/auxFile1.csv
+		# tail -n 1 File50.csv > /tmp/auxFile50.csv
 
+		# cat /tmp/auxFile1.csv >> File1.csv
+		# cat /tmp/auxFile1.csv >> File1.csv
+		# cat /tmp/auxFile1.csv >> File1.csv
+		# cat /tmp/auxFile1.csv >> File1.csv
+		###
 		cat /tmp/auxFile10.csv >> File10.csv
 		cat /tmp/auxFile10.csv >> File10.csv
 		cat /tmp/auxFile10.csv >> File10.csv
 		cat /tmp/auxFile10.csv >> File10.csv
+		###
+		# cat /tmp/auxFile50.csv >> File50.csv
+		# cat /tmp/auxFile50.csv >> File50.csv
+		# cat /tmp/auxFile50.csv >> File50.csv
+		# cat /tmp/auxFile50.csv >> File50.csv
 		###
 		cat /tmp/auxFile90.csv >> File90.csv
 		cat /tmp/auxFile90.csv >> File90.csv
@@ -140,6 +175,9 @@ function doRunLargeDTST_CPUonly {
 
 		mv File10.csv ${1}_10_s${s}
 		mv File90.csv ${1}_90_s${s}
+
+		# mv File1.csv ${1}_1_s${s}
+		# mv File50.csv ${1}_50_s${s}
 	done
 }
 
@@ -149,38 +187,55 @@ function doRunLargeDTST_VERS {
 	do
 		make clean ; make \
 			CMP_TYPE=COMPRESSED LOG_TYPE=VERS USE_TSX_IMPL=1 PR_MAX_RWSET_SIZE=20 \
-			BANK_PART=${2} GPU_PART=0.55 CPU_PART=0.55 P_INTERSECT=0.00 PROFILE=1 -j 14 BANK_INTRA_CONFL=0.0
+			BANK_PART=${2} GPU_PART=0.55 CPU_PART=0.55 P_INTERSECT=0.00 PROFILE=1 -j 14 \
+			BANK_INTRA_CONFL=0.0 >/dev/null
 		actualRun 10 File10
 		actualRun 90 File90
-		# timeout 30s ./bank -n $CPU_THREADS -b 640 -x 256 -a $DATASET -d $DURATION -R 0 -S 16 -l 10 -N 1 -T 32 -f File10 CPU_BACKOFF=180
-		# timeout 30s ./bank -n $CPU_THREADS -b 640 -x 256 -a $DATASET -d $DURATION -R 0 -S 16 -l 90 -N 1 -T 32 -f File90 CPU_BACKOFF=180
+		# actualRun 1 File1
+		# actualRun 50 File50
+		# timeout 40s ./bank -n $CPU_THREADS -b 640 -x 256 -a $DATASET -d $DURATION -R 0 -S 16 -l 10 -N 1 -T 32 -f File10 CPU_BACKOFF=180
+		# timeout 40s ./bank -n $CPU_THREADS -b 640 -x 256 -a $DATASET -d $DURATION -R 0 -S 16 -l 90 -N 1 -T 32 -f File90 CPU_BACKOFF=180
 		###
 		rm -f bank *.o src/*.o ; make simple \
 			CMP_TYPE=COMPRESSED LOG_TYPE=VERS USE_TSX_IMPL=1 PR_MAX_RWSET_SIZE=20 \
-			BANK_PART=${2} GPU_PART=0.55 CPU_PART=0.55 P_INTERSECT=0.20 PROFILE=1 -j 14 BANK_INTRA_CONFL=0.0
+			BANK_PART=${2} GPU_PART=0.55 CPU_PART=0.55 P_INTERSECT=0.20 PROFILE=1 -j 14 \
+			BANK_INTRA_CONFL=0.0 >/dev/null
 		actualRun 10 File10
 		actualRun 90 File90
+		# actualRun 1 File1
+		# actualRun 50 File50
 		###
 		rm -f bank *.o src/*.o ; make simple \
 			CMP_TYPE=COMPRESSED LOG_TYPE=VERS USE_TSX_IMPL=1 PR_MAX_RWSET_SIZE=20 \
-			BANK_PART=${2} GPU_PART=0.55 CPU_PART=0.55 P_INTERSECT=0.50 PROFILE=1 -j 14 BANK_INTRA_CONFL=0.0
+			BANK_PART=${2} GPU_PART=0.55 CPU_PART=0.55 P_INTERSECT=0.50 PROFILE=1 -j 14 \
+			BANK_INTRA_CONFL=0.0 >/dev/null
 		actualRun 10 File10
 		actualRun 90 File90
+		# actualRun 1 File1
+		# actualRun 50 File50
 		###
 		rm -f bank *.o src/*.o ; make simple \
 			CMP_TYPE=COMPRESSED LOG_TYPE=VERS USE_TSX_IMPL=1 PR_MAX_RWSET_SIZE=20 \
-			BANK_PART=${2} GPU_PART=0.55 CPU_PART=0.55 P_INTERSECT=0.80 PROFILE=1 -j 14 BANK_INTRA_CONFL=0.0
+			BANK_PART=${2} GPU_PART=0.55 CPU_PART=0.55 P_INTERSECT=0.80 PROFILE=1 -j 14 \
+			BANK_INTRA_CONFL=0.0 >/dev/null
 		actualRun 10 File10
 		actualRun 90 File90
+		# actualRun 1 File1
+		# actualRun 50 File50
 		###
 		rm -f bank *.o src/*.o ; make simple \
 			CMP_TYPE=COMPRESSED LOG_TYPE=VERS USE_TSX_IMPL=1 PR_MAX_RWSET_SIZE=20 \
-			BANK_PART=${2} GPU_PART=0.55 CPU_PART=0.55 P_INTERSECT=1.00 PROFILE=1 -j 14 BANK_INTRA_CONFL=0.0
+			BANK_PART=${2} GPU_PART=0.55 CPU_PART=0.55 P_INTERSECT=1.00 PROFILE=1 -j 14 \
+			BANK_INTRA_CONFL=0.0 >/dev/null
 		actualRun 10 File10
 		actualRun 90 File90
+		# actualRun 1 File1
+		# actualRun 50 File50
 		###
 		mv File10.csv ${1}_10_s${s}
 		mv File90.csv ${1}_90_s${s}
+		# mv File1.csv ${1}_1_s${s}
+		# mv File50.csv ${1}_50_s${s}
 	done
 }
 
@@ -190,38 +245,55 @@ function doRunLargeDTST_BMAP {
 	do
 		make clean ; make \
 			CMP_TYPE=COMPRESSED LOG_TYPE=BMAP USE_TSX_IMPL=1 PR_MAX_RWSET_SIZE=20 \
-			BANK_PART=${2} GPU_PART=0.55 CPU_PART=0.55 P_INTERSECT=0.00 PROFILE=1 -j 14 BANK_INTRA_CONFL=0.0
-		# timeout 30s ./bank -n $CPU_THREADS -b 640 -x 256 -a $DATASET -d $DURATION -R 0 -S 16 -l 10 -N 1 -T 32 -f File10 CPU_BACKOFF=180
-		# timeout 30s ./bank -n $CPU_THREADS -b 640 -x 256 -a $DATASET -d $DURATION -R 0 -S 16 -l 90 -N 1 -T 32 -f File90 CPU_BACKOFF=180
+			BANK_PART=${2} GPU_PART=0.55 CPU_PART=0.55 P_INTERSECT=0.00 PROFILE=1 -j 14 \
+			BANK_INTRA_CONFL=0.0 >/dev/null
+		# timeout 40s ./bank -n $CPU_THREADS -b 640 -x 256 -a $DATASET -d $DURATION -R 0 -S 16 -l 10 -N 1 -T 32 -f File10 CPU_BACKOFF=180
+		# timeout 40s ./bank -n $CPU_THREADS -b 640 -x 256 -a $DATASET -d $DURATION -R 0 -S 16 -l 90 -N 1 -T 32 -f File90 CPU_BACKOFF=180
 		actualRun 10 File10
 		actualRun 90 File90
+		# actualRun 1 File1
+		# actualRun 50 File50
 		###
 		make clean ; make \
 			CMP_TYPE=COMPRESSED LOG_TYPE=BMAP USE_TSX_IMPL=1 PR_MAX_RWSET_SIZE=20 \
-			BANK_PART=${2} GPU_PART=0.55 CPU_PART=0.55 P_INTERSECT=0.20 PROFILE=1 -j 14 BANK_INTRA_CONFL=0.0
+			BANK_PART=${2} GPU_PART=0.55 CPU_PART=0.55 P_INTERSECT=0.20 PROFILE=1 -j 14 \
+			BANK_INTRA_CONFL=0.0 >/dev/null
 		actualRun 10 File10
 		actualRun 90 File90
+		# actualRun 1 File1
+		# actualRun 50 File50
 		###
 		make clean ; make \
 			CMP_TYPE=COMPRESSED LOG_TYPE=BMAP USE_TSX_IMPL=1 PR_MAX_RWSET_SIZE=20 \
-			BANK_PART=${2} GPU_PART=0.55 CPU_PART=0.55 P_INTERSECT=0.50 PROFILE=1 -j 14 BANK_INTRA_CONFL=0.0
+			BANK_PART=${2} GPU_PART=0.55 CPU_PART=0.55 P_INTERSECT=0.50 PROFILE=1 -j 14 \
+			BANK_INTRA_CONFL=0.0 >/dev/null
 		actualRun 10 File10
 		actualRun 90 File90
+		# actualRun 1 File1
+		# actualRun 50 File50
 		###
 		make clean ; make \
 			CMP_TYPE=COMPRESSED LOG_TYPE=BMAP USE_TSX_IMPL=1 PR_MAX_RWSET_SIZE=20 \
-			BANK_PART=${2} GPU_PART=0.55 CPU_PART=0.55 P_INTERSECT=0.80 PROFILE=1 -j 14 BANK_INTRA_CONFL=0.0
+			BANK_PART=${2} GPU_PART=0.55 CPU_PART=0.55 P_INTERSECT=0.80 PROFILE=1 -j 14 \
+			BANK_INTRA_CONFL=0.0 >/dev/null
 		actualRun 10 File10
 		actualRun 90 File90
+		# actualRun 1 File1
+		# actualRun 50 File50
 		###
 		make clean ; make \
 			CMP_TYPE=COMPRESSED LOG_TYPE=BMAP USE_TSX_IMPL=1 PR_MAX_RWSET_SIZE=20 \
-			BANK_PART=${2} GPU_PART=0.55 CPU_PART=0.55 P_INTERSECT=1.00 PROFILE=1 -j 14 BANK_INTRA_CONFL=0.0
+			BANK_PART=${2} GPU_PART=0.55 CPU_PART=0.55 P_INTERSECT=1.00 PROFILE=1 -j 14 \
+			BANK_INTRA_CONFL=0.0 >/dev/null
 		actualRun 10 File10
 		actualRun 90 File90
+		# actualRun 1 File1
+		# actualRun 50 File50
 		###
 		mv File10.csv ${1}_10_s${s}
 		mv File90.csv ${1}_90_s${s}
+		# mv File1.csv ${1}_1_s${s}
+		# mv File50.csv ${1}_50_s${s}
 	done
 }
 
@@ -233,13 +305,13 @@ CPU_THREADS=14
 ### 1GB
 DATASET=250000000
 ############### GPU-only
-# doRunLargeDTST_GPUonly inter_GPUonly_rand_sep 1
+doRunLargeDTST_GPUonly inter_GPUonly_rand_sep 1
 
 ############## CPU-only
-# doRunLargeDTST_CPUonly inter_CPUonly_rand_sep 1
+doRunLargeDTST_CPUonly inter_CPUonly_rand_sep 1
 
 ############## VERS
-# doRunLargeDTST_VERS inter_VERS_rand_sep 1
+doRunLargeDTST_VERS inter_VERS_rand_sep 1
 
 ############## BMAP
 doRunLargeDTST_BMAP inter_BMAP_rand_sep 1
@@ -250,16 +322,16 @@ doRunLargeDTST_BMAP inter_BMAP_rand_sep 1
 ### 100MB
 DATASET=25000000
 ############### GPU-only
-# doRunLargeDTST_GPUonly inter_GPUonly_rand_sep_SMALL 1
+doRunLargeDTST_GPUonly inter_GPUonly_rand_sep_SMALL 1
 
 ############## CPU-only
-# doRunLargeDTST_CPUonly inter_CPUonly_rand_sep_SMALL 1
+doRunLargeDTST_CPUonly inter_CPUonly_rand_sep_SMALL 1
 
 ############## VERS
-# doRunLargeDTST_VERS inter_VERS_rand_sep_SMALL 1
+doRunLargeDTST_VERS inter_VERS_rand_sep_SMALL 1
 
 ############## BMAP
-# doRunLargeDTST_BMAP inter_BMAP_rand_sep_SMALL 1
+doRunLargeDTST_BMAP inter_BMAP_rand_sep_SMALL 1
 ###########################################################################
 #
 # ################ Zipf

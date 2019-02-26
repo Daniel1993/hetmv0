@@ -54,7 +54,11 @@ ifeq ($(USE_TSX_IMPL),1)
 INCLUDES  += -I $(HTM_SGL)/include
 LIBS      += -L $(HTM_SGL)/bin -lhtm_sgl -L $(TSX_ROOT) -ltsxMOD
 endif
-
+ifneq ($(CFG),debug)
+CFLAGS   += -DNDEBUG
+CXXFLAGS += -DNDEBUG
+NVFLAGS  += -DNDEBUG
+endif
 CFLAGS     := -c $(DEFINES) $(INCLUDES) -std=c99
 CXXFLAGS   := -c $(DEFINES) $(INCLUDES) -std=c++11
 NVFLAGS    := -c $(DEFINES) $(INCLUDES) -std=c++11 \
@@ -163,7 +167,9 @@ $(APP): $(OBJS)
 		DISABLE_NON_BLOCKING=$(DISABLE_NON_BLOCKING) \
 		HETM_DISABLE_CHUNKS=$(DHETM_DISABLE_CHUNKS) \
 		DEFAULT_BITMAP_GRANULARITY_BITS=$(DEFAULT_BITMAP_GRANULARITY_BITS) \
-		PRINT_DEB=$(PRINT_DEB)
+		PRINT_DEB=$(PRINT_DEB) \
+		LOG_SIZE=$(LOG_SIZE) \
+		STM_LOG_BUFFER_SIZE=$(STM_LOG_BUFFER_SIZE)
 	@echo "Linking..."
 	### TODO: optimization breaks performance
 	$(CXX) $(CXXFLAGS) -O1 -o $(SRC)/memcd2.o $(SRC)/memcd2.cpp

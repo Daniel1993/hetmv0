@@ -150,6 +150,9 @@ int jobWithCuda_run(cuda_t *d, account_t *a) // TODO: memcd
   offload_thread_args.d = d;
   offload_thread_args.a = a;
 
+  // TODO: if overlap kernel
+  // offloadBankTxThread((void*)&offload_thread_args);
+
   HeTM_async_request((HeTM_async_req_s){
     .args = (void*)&offload_thread_args,
     .fn = offloadBankTxThread

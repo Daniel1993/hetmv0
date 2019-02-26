@@ -118,13 +118,13 @@
 	GPU_log->isGPUOnly = (HeTM_shared_data.isCPUEnabled == 0); \
 	/* ---------------------- */ \
 	memman_select("HeTM_mempool_bmap"); \
-	memman_cpy_to_gpu(NULL, NULL); \
+	memman_cpy_to_gpu(NULL, NULL, *hetm_batchCount); \
 	memman_bmap_s *bmap = (memman_bmap_s*)memman_get_cpu(NULL); \
 	GPU_log->bmap = (memman_bmap_s*)memman_get_gpu(NULL); \
 	CUDA_CHECK_ERROR(cudaMemset(bmap->dev, 0, bmap->div), ""); \
 	/* ---------------------- */ \
 	memman_select("HeTM_mempool_backup_bmap"); \
-	memman_cpy_to_gpu(NULL, NULL); \
+	memman_cpy_to_gpu(NULL, NULL, *hetm_batchCount); \
 	memman_bmap_s *bmapBackup = (memman_bmap_s*)memman_get_cpu(NULL); \
 	GPU_log->bmapBackup = (memman_bmap_s*)memman_get_gpu(NULL); \
 	CUDA_CHECK_ERROR(cudaMemset(bmapBackup->dev, 0, bmapBackup->div), ""); \
@@ -132,7 +132,7 @@
 	args->host.pr_args_ext = (void*)GPU_log; \
 	memman_select("HeTM_gpuLog"); \
 	args->dev.pr_args_ext = memman_get_gpu(NULL); \
-	memman_cpy_to_gpu(NULL, NULL); \
+	memman_cpy_to_gpu(NULL, NULL, *hetm_batchCount); \
 }) \
 
 #ifdef PR_AFTER_RUN_EXT
@@ -196,11 +196,15 @@
 #if HETM_CMP_TYPE == HETM_CMP_DISABLED
 #define PR_AFTER_VAL_LOCKS_EXT(args) /* empty */
 #else /* HETM_CMP_TYPE != HETM_CMP_DISABLED */
+
+// TODO: instrumentation in the GPU is reduced via "isGPUOnly" flag, which
+// also afects the copies (copy all)
+
 #define PR_AFTER_VAL_LOCKS_EXT(args) ({ \
   int i; \
 	HeTM_GPU_log_s *GPU_log = (HeTM_GPU_log_s*)args->pr_args_ext; \
 	/* TODO: explicit log only */ \
-	if (!GPU_log->isGPUOnly) { \
+	/*if (!GPU_log->isGPUOnly) {*/ \
 		HeTM_GPU_log_explicit_before_reads \
 		/* ---------------------- */ \
 		/* add read to devLogR */ \
@@ -210,12 +214,12 @@
 		for (i = 0; i < args->wset.size; i++) { \
 			/* this is avoided through a memcpy D->D after batch */ \
 			/*memman_access_addr_dev(GPU_log->bmapBackup, args->wset.addrs[i], 1);*/ \
-			memman_access_addr_dev(GPU_log->bmap, args->wset.addrs[i], 1); \
+			memman_access_addr_dev(GPU_log->bmap, args->wset.addrs[i], GPU_log->batchCount); \
 		} \
 		/* TODO: explicit logOnly */ \
 		HeTM_GPU_log_explicit_after_reads /* offset of the next transaction */ \
 		/* ---------------------- */ \
-	} \
+	/*}*/ \
 }) \
 //
 #endif /* HETM_CMP_TYPE == HETM_CMP_DISABLED */

@@ -133,7 +133,7 @@ static void run_bankTx(knlman_callback_params_s params)
 
   input->input_buffer = GPUInputBuffer;
   input->output_buffer = GPUoutputBuffer;
-  memman_cpy_to_gpu(NULL, NULL);
+  memman_cpy_to_gpu(NULL, NULL, *hetm_batchCount);
 
   // TODO: change PR-STM to use knlman
   // PR_blockNum = params.blocks.x;
@@ -182,7 +182,7 @@ static void run_memcdReadTx(knlman_callback_params_s params)
   input->curr_clock = (int*)memman_get_gpu(NULL);
 
   memman_select("HeTM_memcdTx_input");
-  memman_cpy_to_gpu(NULL, NULL);
+  memman_cpy_to_gpu(NULL, NULL, *hetm_batchCount);
 
   // TODO:
   // inputDev = (HeTM_memcdTx_input_s*)memman_ad_hoc_alloc(NULL, &input, sizeof(HeTM_memcdTx_input_s));
@@ -235,7 +235,7 @@ static void run_memcdWriteTx(knlman_callback_params_s params)
   input->curr_clock = (int*)memman_get_gpu(NULL);
 
   memman_select("HeTM_memcdTx_input");
-  memman_cpy_to_gpu(NULL, NULL);
+  memman_cpy_to_gpu(NULL, NULL, *hetm_batchCount);
 
   // TODO: change PR-STM to use knlman
   // PR_blockNum = params.blocks.x;

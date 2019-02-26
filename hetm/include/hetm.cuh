@@ -97,6 +97,13 @@ typedef struct HeTM_thread_
   double timeCmpKernels;
   double timeBackoff;
   double timeBlocked;
+
+  int targetCopyNb;
+  int curCopyNb;
+  int doHardLogCpy;
+  int isCopying;
+  HETM_LOG_T truncated;
+  int isNotFirstCpy;
 } HeTM_thread_s;
 
 // sigleton

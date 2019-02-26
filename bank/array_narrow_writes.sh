@@ -14,7 +14,7 @@ DURATION=20000
 BLOCKS="2 4 8 16 32 64 256 512 1024" # 512
 THREADS="512" #"2 4 8 16 32 64 96 256 320 512 640 768 1024"
 BATCH_SIZE="4"
-SAMPLES=3
+SAMPLES=5
 #./makeTM.sh
 
 CPU_THREADS=4
@@ -34,13 +34,15 @@ function doRunLargeDTST {
 	for s in `seq 1 $SAMPLES`
 	do
 		# 100M 500M 1G 1.5G
-		timeout 40s ./bank -n $CPU_THREADS -b 640 -x 256 -a 250000000 -d $DURATION -R 0 -S 4 -l 10 -N 1  -T 32 CPU_BACKOFF=100
-		timeout 40s ./bank -n $CPU_THREADS -b 640 -x 256 -a 250000000 -d $DURATION -R 0 -S 4 -l 10 -N 2  -T 32 CPU_BACKOFF=100
-		timeout 40s ./bank -n $CPU_THREADS -b 640 -x 256 -a 250000000 -d $DURATION -R 0 -S 4 -l 10 -N 4  -T 32 CPU_BACKOFF=100
-		timeout 40s ./bank -n $CPU_THREADS -b 640 -x 256 -a 250000000 -d $DURATION -R 0 -S 4 -l 10 -N 8  -T 32 CPU_BACKOFF=100
-		timeout 40s ./bank -n $CPU_THREADS -b 640 -x 256 -a 250000000 -d $DURATION -R 0 -S 4 -l 10 -N 16 -T 32 CPU_BACKOFF=100
-		timeout 40s ./bank -n $CPU_THREADS -b 640 -x 256 -a 250000000 -d $DURATION -R 0 -S 4 -l 10 -N 32 -T 32 CPU_BACKOFF=100
-		timeout 40s ./bank -n $CPU_THREADS -b 640 -x 256 -a 250000000 -d $DURATION -R 0 -S 4 -l 10 -N 64 -T 32 CPU_BACKOFF=100
+		timeout 40s ./bank -n $CPU_THREADS -b 1024 -x 128 -a 25000000 -d $DURATION -R 0 -S 4 -l 100 -N 1      -T 32 CPU_BACKOFF=400
+		timeout 40s ./bank -n $CPU_THREADS -b 1024 -x 128 -a 25000000 -d $DURATION -R 0 -S 4 -l 100 -N 25     -T 32 CPU_BACKOFF=400
+		timeout 40s ./bank -n $CPU_THREADS -b 1024 -x 128 -a 25000000 -d $DURATION -R 0 -S 4 -l 100 -N 250    -T 32 CPU_BACKOFF=400
+		timeout 40s ./bank -n $CPU_THREADS -b 1024 -x 128 -a 25000000 -d $DURATION -R 0 -S 4 -l 100 -N 2500   -T 32 CPU_BACKOFF=400
+		timeout 40s ./bank -n $CPU_THREADS -b 1024 -x 128 -a 25000000 -d $DURATION -R 0 -S 4 -l 100 -N 25000  -T 32 CPU_BACKOFF=400
+		# timeout 40s ./bank -n $CPU_THREADS -b 1024 -x 128 -a 25000000 -d $DURATION -R 0 -S 8 -l 100 -N 250000 -T 32 CPU_BACKOFF=100
+		# timeout 40s ./bank -n $CPU_THREADS -b 1024 -x 128 -a 250000000 -d $DURATION -R 0 -S 8 -l 90 -N 1      -T 32 CPU_BACKOFF=100
+		# timeout 40s ./bank -n $CPU_THREADS -b 1024 -x 128 -a 250000000 -d $DURATION -R 0 -S 8 -l 90 -N 250    -T 32 CPU_BACKOFF=100
+		# timeout 40s ./bank -n $CPU_THREADS -b 1024 -x 128 -a 250000000 -d $DURATION -R 0 -S 8 -l 90 -N 250000 -T 32 CPU_BACKOFF=100
 		mv Bank.csv ${1}${s}
 	done
 }
@@ -51,23 +53,27 @@ CPU_THREADS=14
 ###########################################################################
 
 ############### GPU-only
-make clean ; make CMP_TYPE=DISABLED USE_TSX_IMPL=1 CPUEn=0 PR_MAX_RWSET_SIZE=20 GPU_PART=0.55 \
-	CPU_PART=0.55 P_INTERSECT=0.00 BANK_PART=1 PROFILE=1 -j 14
+make clean ; make CMP_TYPE=COMPRESSED USE_TSX_IMPL=1 CPUEn=0 PR_MAX_RWSET_SIZE=20  \
+	BANK_PART=6 GPU_PART=0.55 CPU_PART=0.55 P_INTERSECT=0.00 PROFILE=1 -j 14 \
+	DEFAULT_BITMAP_GRANULARITY_BITS=12 >/dev/null
 doRunLargeDTST GPUonly_rand_sep_DISABLED_s
 
 ############## CPU-only
 make clean ; make INST_CPU=0 GPUEn=0 USE_TSX_IMPL=1 PR_MAX_RWSET_SIZE=20 \
-		BANK_PART=1 GPU_PART=0.55 CPU_PART=0.55 P_INTERSECT=0.00 PROFILE=1 -j 14
+		BANK_PART=6 GPU_PART=0.55 CPU_PART=0.55 P_INTERSECT=0.00 PROFILE=1 -j 14 \
+		DEFAULT_BITMAP_GRANULARITY_BITS=12 >/dev/null
 doRunLargeDTST CPUonly_rand_sep_DISABLED_s
 
 ############## VERS
 make clean ; make CMP_TYPE=COMPRESSED LOG_TYPE=VERS USE_TSX_IMPL=1 PR_MAX_RWSET_SIZE=20 \
-	BANK_PART=1 GPU_PART=0.55 CPU_PART=0.55 P_INTERSECT=0.00 PROFILE=1 -j 14
+	BANK_PART=6 GPU_PART=0.55 CPU_PART=0.55 P_INTERSECT=0.00 PROFILE=1 -j 14 \
+	DEFAULT_BITMAP_GRANULARITY_BITS=12 >/dev/null
 doRunLargeDTST VERS_rand_sep_s
 
 ############## BMAP
 make clean ; make CMP_TYPE=COMPRESSED LOG_TYPE=BMAP USE_TSX_IMPL=1 PR_MAX_RWSET_SIZE=20 \
-	BANK_PART=1 GPU_PART=0.55 CPU_PART=0.55 P_INTERSECT=0.00 PROFILE=1 -j 14
+	BANK_PART=6 GPU_PART=0.55 CPU_PART=0.55 P_INTERSECT=0.00 PROFILE=1 -j 14 \
+	DEFAULT_BITMAP_GRANULARITY_BITS=12 >/dev/null
 doRunLargeDTST BMAP_rand_sep_s
 ###########################################################################
 

@@ -14,7 +14,7 @@ DURATION=30000
 BLOCKS="2 4 8 16 32 64 256 512 1024" # 512
 THREADS="512" #"2 4 8 16 32 64 96 256 320 512 640 768 1024"
 BATCH_SIZE="4"
-SAMPLES=2
+SAMPLES=3
 #./makeTM.sh
 
 CPU_THREADS=4
@@ -44,6 +44,8 @@ GPU_BLOCKS=320
 GPU_THREADS=256
 
 CPU_THREADS=14
+
+# sleep 20m
 
 SIZE_ZIPF=2000000
 GPU_INPUT="GPU_input_${SIZE_ZIPF}_099_25165824.txt"
@@ -158,7 +160,7 @@ function doRun_HeTM_SHARED_steal {
 	# make clean ; make CMP_TYPE=COMPRESSED BANK_PART=3 \
 	# 	PR_MAX_RWSET_SIZE=20 LOG_TYPE=${2} USE_TSX_IMPL=1 PROFILE=1 -j 14 \
 	# 	BENCH=MEMCD CPU_STEAL_ONLY_GETS=0 >/dev/null
-	for s in `seq 1 $SAMPLES`
+	for s in `seq 3 $SAMPLES`
 	do
 		### 64 k
 		GPU_BLOCKS=128
@@ -183,7 +185,7 @@ function doRun_HeTM_SHARED_steal {
 		###
 		mv GPUsteal.csv ${1}_GPUsteal_00_s${s}
 	done
-	for s in `seq 1 $SAMPLES`
+	for s in `seq 3 $SAMPLES`
 	do
 		### 64 k
 		GPU_BLOCKS=128
@@ -208,7 +210,7 @@ function doRun_HeTM_SHARED_steal {
 		###
 		mv GPUsteal.csv ${1}_GPUsteal_01_s${s}
 	done
-	for s in `seq 1 $SAMPLES`
+	for s in `seq 3 $SAMPLES`
 	do
 		### 64 k
 		GPU_BLOCKS=128
@@ -233,7 +235,7 @@ function doRun_HeTM_SHARED_steal {
 		###
 		mv GPUsteal.csv ${1}_GPUsteal_05_s${s}
 	done
-	for s in `seq 1 $SAMPLES`
+	for s in `seq 3 $SAMPLES`
 	do
 		### 64 k
 		GPU_BLOCKS=128
@@ -258,7 +260,7 @@ function doRun_HeTM_SHARED_steal {
 		###
 		mv GPUsteal.csv ${1}_GPUsteal_09_s${s}
 	done
-	for s in `seq 1 $SAMPLES`
+	for s in `seq 3 $SAMPLES`
 	do
 		### 64 k
 		GPU_BLOCKS=128
@@ -288,7 +290,7 @@ function doRun_HeTM_SHARED_steal {
 function doRun_GPUonly {
 	make clean ; make CMP_TYPE=COMPRESSED BANK_PART=6 CPUEn=0 PROFILE=1 \
 		PR_MAX_RWSET_SIZE=20 -j 14 BENCH=MEMCD >/dev/null
-		for s in `seq 1 $SAMPLES`
+		for s in `seq 3 $SAMPLES`
 		do
 			### 64 k
 			GPU_BLOCKS=128
@@ -318,7 +320,7 @@ function doRun_GPUonly {
 function doRun_CPUonly {
 	make clean ; make CMP_TYPE=DISABLED BANK_PART=6 USE_TSX_IMPL=1 INST_CPU=0 GPUEn=0 \
 		PROFILE=1 PR_MAX_RWSET_SIZE=20 -j 14 BENCH=MEMCD >/dev/null
-	for s in `seq 1 $SAMPLES`
+	for s in `seq 3 $SAMPLES`
 	do
 		### 64 k
 		GPU_BLOCKS=128

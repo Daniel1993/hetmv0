@@ -65,7 +65,7 @@ int HeTM_start(HeTM_callback CPUclbk, HeTM_callback GPUclbk, void *args)
   }
 
   int i;
-for (i = 0; i < HeTM_shared_data.nbThreads; i++) {
+  for (i = 0; i < HeTM_shared_data.nbThreads; i++) {
     if(i == HeTM_shared_data.nbCPUThreads) {
       // last thread is the GPU
       HeTM_shared_data.threadsInfo[i].callback = GPUclbk;

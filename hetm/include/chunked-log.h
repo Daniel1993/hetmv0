@@ -11,6 +11,18 @@
 #include <stdlib.h>
 #include <string.h>
 #include "chunked-log-aux.h"
+#include <assert.h>
+#include <errno.h>
+
+#ifndef malloc_or_die
+#define malloc_or_die(var, nb) \
+if (((var) = (__typeof__((var)))malloc((nb) * sizeof(__typeof__(*(var))))) == NULL) { \
+  fprintf(stderr, "malloc error \"%s\" at " __FILE__":%i\n", \
+  strerror(errno), __LINE__); \
+  exit(EXIT_FAILURE); \
+}
+#endif /* malloc_or_die */
+
 
 typedef struct chunked_log_node_ {
   char* volatile chunk; // assuming sizeof(char) == 1 Byte (8 bits)
@@ -46,7 +58,7 @@ typedef struct mod_chunked_log_ {
  * Each time a thread frees a node, rather than releasing the memory, the node
  * is placed here. Upon alloc, the system checks if there are freed nodes.
  */
-#define SIZE_OF_FREE_NODES 0x100L // needs to be REALLY big!
+#define SIZE_OF_FREE_NODES 0x1000L // needs to be REALLY big!
 
 // TODO: cannot use __thread because the thread that FREEs is different!
 // use some sort of array[nb_threads]
@@ -75,9 +87,45 @@ extern __thread unsigned long chunked_log_alloc_r_ptr;
   (log)->bucketsEnd = NULL; \
 })
 
+// TODO: if out of space to free --> this will crash
+// TODO: just use mallocs is much faster
+// static inline void CHUNKED_LOG_FREE(chunked_log_node_s *node)
+// {
+//   if (node->nb_buckets > 0){
+//     free(node->p.posArray);
+//   }
+//   free(node->chunk);
+//   free(node);
+// }
+#define CHUNKED_LOG_FREE(node) ({ \
+  /*unsigned long i = __sync_fetch_and_add(&chunked_log_free_r_ptr, 1); */\
+  assert(node != NULL); \
+  for (int j = chunked_log_alloc_ptr; j < chunked_log_free_ptr; ++j) \
+    if (node == chunked_log_node_recycled[j % SIZE_OF_FREE_NODES]) assert(0); \
+  unsigned long i = chunked_log_free_ptr; \
+  chunked_log_node_recycled[i % SIZE_OF_FREE_NODES] = node; /* barrier needed? */ \
+  node->next = node->prev = NULL; /* TODO: this is fixing some bug in VERS */ \
+  chunked_log_free_ptr++; \
+  /* -------------------- */ \
+  /*if (node->nb_buckets > 0) free(node->p.posArray); \
+  free(node->chunk); \
+  free(node);*/ \
+}) \
+
 /**
  * Destroy all thread local nodes.
  */
+ // static inline chunked_log_node_s* CHUNKED_LOG_POP(chunked_log_s *log);
+ // static inline void CHUNKED_LOG_DESTROY(chunked_log_s *log)
+ // {
+ //   chunked_log_node_s *node = CHUNKED_LOG_POP(log);
+ //   while (node != NULL) {
+ //     CHUNKED_LOG_FREE(node);
+ //     node = CHUNKED_LOG_POP(log);
+ //   }
+ //   (log)->curr = (log)->last = (log)->first = NULL;
+ //   (log)->size = 0;
+ // }
 #define CHUNKED_LOG_DESTROY(log) ({ \
   chunked_log_node_s *node = CHUNKED_LOG_POP(log); \
   while (node != NULL) { \
@@ -116,7 +164,7 @@ extern __thread unsigned long chunked_log_alloc_r_ptr;
 /**
  * Truncates a portion of the log.
  */
-#define CHUNKED_LOG_TRUNCATE(log, nb_chunks) ({ \
+#define CHUNKED_LOG_TRUNCATE(log, nb_chunks, nbChunks) ({ \
   CHUNKED_LOG_LOCAL_INST(res); \
   chunked_log_node_s *node = (log)->first; \
   chunked_log_node_s *next; \
@@ -125,11 +173,22 @@ extern __thread unsigned long chunked_log_alloc_r_ptr;
     if (node == NULL) { /* no more available */ \
       break; \
     } \
-    next = node->next; \
+    next = node->next; /* TODO: this may cause SIGSEGV !!! */ \
     CHUNKED_LOG_POP(log); /* removes before inserting */ \
     CHUNKED_LOG_EXTEND(&res, node); \
+    node->next = next; \
+    if (next != NULL) next->prev = node; \
     node = next; \
   } \
+  if ((log)->first != NULL) { \
+    (log)->first->prev = NULL; \
+    (log)->last->next = NULL; \
+  } \
+  if (res.first != NULL) { \
+    res.first->prev = NULL; \
+    res.last->next = NULL; \
+  } \
+  *nbChunks = i; /* this may be different from nb_chunks */ \
   res; \
 })
 
@@ -202,8 +261,8 @@ extern __thread unsigned long chunked_log_alloc_r_ptr;
   size_t size = size_one_element*nb_elements; \
   chunked_log_node_s *res = CHUNKED_LOG_FIND_FREE(size, 0); \
   if (res == NULL) { \
-    res = (chunked_log_node_s*)malloc(sizeof(chunked_log_node_s)); \
-    res->chunk = (char*)malloc(size); \
+    malloc_or_die(res, sizeof(chunked_log_node_s)); \
+    malloc_or_die(res->chunk, size); \
   } \
   res->nb_buckets = 0; \
   res->gran  = size_one_element; \
@@ -221,9 +280,9 @@ extern __thread unsigned long chunked_log_alloc_r_ptr;
   /* TODO: must look for the same number of buckets also */ \
   chunked_log_node_s *res = CHUNKED_LOG_FIND_FREE(size, nbBuckets); \
   if (res == NULL) { \
-    res = (chunked_log_node_s*)malloc(sizeof(chunked_log_node_s)); \
-    res->chunk = (char*)malloc(size*nbBuckets); \
-    res->p.posArray = (size_t*)malloc(sizeof(size_t)*nbBuckets); \
+    malloc_or_die(res, sizeof(chunked_log_node_s)); \
+    malloc_or_die(res->chunk, size*nbBuckets); \
+    malloc_or_die(res->p.posArray, sizeof(size_t)*nbBuckets); \
   } \
   memset(res->p.posArray, 0, sizeof(size_t)*nbBuckets); \
   memset(res->chunk, 0, size*nbBuckets); \
@@ -234,19 +293,19 @@ extern __thread unsigned long chunked_log_alloc_r_ptr;
   res; \
 })
 
-// TODO: if out of space to free --> this will crash
-// TODO: just use mallocs is much faster
-#define CHUNKED_LOG_FREE(node) ({ \
-  /*unsigned long i = __sync_fetch_and_add(&chunked_log_free_r_ptr, 1); */\
-  unsigned long i = chunked_log_free_ptr++; \
-  chunked_log_node_recycled[i % SIZE_OF_FREE_NODES] = node; /* barrier needed? */ \
-  node->next = node->prev = NULL; /* TODO: this is fixing some bug in VERS */ \
-  /*__sync_fetch_and_add(&chunked_log_free_ptr, 1);*/ \
-  /*if (node->nb_buckets > 0) free(node->p.posArray); \
-  free(node->chunk);\
-  free(node);*/ \
-}) \
-
+// static inline chunked_log_node_s* CHUNKED_LOG_APPEND_AUX(chunked_log_s *log, chunked_log_node_s *node, void *el)
+// {
+//   chunked_log_node_s *newNode = node;
+//   void *addr = node->chunk + node->p.pos;
+//   memcpy(addr, el, node->gran);
+//   node->p.pos += node->gran;
+//   if (node->p.pos >= node->size) {
+//     newNode = CHUNKED_LOG_ALLOC((log)->gran, (log)->nb_elements);
+//     newNode->prev = node;
+//     node->next = newNode;
+//   }
+//   return newNode;
+// }
 #define CHUNKED_LOG_APPEND_AUX(log, node, el) ({ \
   chunked_log_node_s *newNode = node; \
   void *addr = node->chunk + node->p.pos; \
@@ -279,6 +338,18 @@ extern __thread unsigned long chunked_log_alloc_r_ptr;
 /**
  * Appends an element in the log. The element must be a pointer.
  */
+// static inline void CHUNKED_LOG_APPEND(chunked_log_s *log, void *el)
+// {
+//   chunked_log_node_s *node = (log)->last;
+//   if (node == NULL) {
+//     node = CHUNKED_LOG_ALLOC((log)->gran, (log)->nb_elements);
+//     CHUNKED_LOG_EXTEND((log), node);
+//   }
+//   chunked_log_node_s *newNode = CHUNKED_LOG_APPEND_AUX(log, node, el);
+//   if (node != newNode) {
+//     CHUNKED_LOG_EXTEND((log), newNode);
+//   }
+// }
 #define CHUNKED_LOG_APPEND(log, el) ({ \
   chunked_log_node_s *node = (log)->last; \
   if (node == NULL) { \
@@ -324,11 +395,19 @@ extern __thread unsigned long chunked_log_alloc_r_ptr;
 /**
  * Removes the first node in the log. Does not free.
  */
+// static inline chunked_log_node_s* CHUNKED_LOG_POP(chunked_log_s *log)
+// {
+//   chunked_log_node_s *node = log->first;
+//   if (node != NULL) {
+//     CHUNKED_LOG_REMOVE_FRONT(log);
+//     if (log->size > 0) log->size--;
+//   }
+//   return node;
+// }
 #define CHUNKED_LOG_POP(log) ({ \
   chunked_log_node_s *node = (log)->first; \
   if (node != NULL) { \
-    chunked_log_node_s *rem = node->next; \
-    CHUNKED_LOG_REMOVE_FRONT(log, rem); \
+    CHUNKED_LOG_REMOVE_FRONT(log); \
     if ((log)->size > 0) (log)->size--; \
   } \
   node; \
