@@ -33,10 +33,8 @@ typedef struct HeTM_cmp_ {
 
 typedef struct HeTM_knl_global_ {
   void *devMemPoolBasePtr;
-// #if HETM_LOG_TYPE == HETM_ADDR_LOG || HETM_LOG_TYPE == HETM_BMAP_LOG
   void *devMemPoolBackupBasePtr;
   void *devMemPoolBackupBmap;
-// #endif /* HETM_LOG_TYPE == HETM_ADDR_LOG || HETM_LOG_TYPE == HETM_BMAP_LOG */
   void *hostMemPoolBasePtr;
   void *versions;
   int *isInterConfl;
@@ -87,9 +85,5 @@ __global__ void HeTM_knl_checkTxCompressed(HeTM_knl_cmp_args_s args);
 __global__ void HeTM_knl_earlyCheckTxCompressed(HeTM_knl_cmp_args_s args);
 __global__ void HeTM_knl_checkTxExplicit(HeTM_knl_cmp_args_s args);
 #endif /* HETM_LOG_TYPE != HETM_BMAP_LOG */
-
-#if HETM_LOG_TYPE == HETM_ADDR_LOG
-__global__ void HeTM_knl_apply_cpu_data(int amount, size_t nbGranules);
-#endif /* HETM_LOG_TYPE == HETM_ADDR_LOG */
 
 #endif /* HETM_CMP_KERNELS_H_GUARD_ */

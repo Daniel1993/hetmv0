@@ -4,10 +4,6 @@
 #include "hetm-cmp-kernels.cuh"
 #include "knlman.h"
 
-#if HETM_LOG_TYPE == HETM_ADDR_LOG
-#include "hetm-cmp-kernels.cuh" // must run apply kernel
-#endif
-
 #include <list>
 #include <mutex>
 
@@ -762,44 +758,6 @@ static void offloadAfterCmp(void *args)
 #else /* HETM_LOG_TYPE != HETM_BMAP_LOG */
 
 HeTM_set_is_interconflict(HeTM_get_inter_confl_flag(HeTM_memStream2, 1));
-#if HETM_LOG_TYPE == HETM_ADDR_LOG
-  HeTM_thread_s *threadData = (HeTM_thread_s*)args;
-  if (!HeTM_is_interconflict()) {
-    size_t nbGranules = HeTM_shared_data.sizeMemPool / PR_LOCK_GRANULARITY;
-    size_t wSetSize;
-
-    int amount = 4; // TODO
-    int nbThreads = 512;
-    int modBlocks = nbGranules % (nbThreads * amount);
-    int nbBlocks = nbGranules / (nbThreads * amount);
-    if (modBlocks != 0) nbBlocks++;
-    // args not needed
-    cudaDeviceSynchronize(); // TODO: is this needed?
-    memman_select("HeTM_mempool_backup"); // sends the CPU dataset (apply WSet)
-    CUDA_EVENT_RECORD(threadData->cpyWSetStartEvent, (cudaStream_t)HeTM_memStream);
-    memman_cpy_to_gpu(HeTM_memStream, &wSetSize, afterBatch_batchCount);
-    HeTM_stats_data.sizeCpyWSet += wSetSize;
-    CUDA_EVENT_RECORD(threadData->cpyWSetStopEvent, (cudaStream_t)HeTM_memStream);
-    cudaDeviceSynchronize(); // TODO: is this needed?
-    CUDA_EVENT_SYNCHRONIZE(threadData->cpyWSetStartEvent);
-    CUDA_EVENT_SYNCHRONIZE(threadData->cpyWSetStopEvent);
-    CUDA_EVENT_ELAPSED_TIME(&threadData->timeCpy, threadData->cpyWSetStartEvent,
-      threadData->cpyWSetStopEvent);
-    if (threadData->timeCpy > 0) { // TODO: bug
-      threadData->timeCpySum += threadData->timeCpy;
-    }
-
-    CUDA_EVENT_RECORD(threadData->cmpStartEvent, NULL);
-    HeTM_knl_apply_cpu_data<<<nbBlocks, nbThreads>>>(amount, nbGranules);
-    CUDA_EVENT_RECORD(threadData->cmpStopEvent, NULL);
-    cudaDeviceSynchronize();
-    CUDA_EVENT_SYNCHRONIZE(threadData->cmpStartEvent);
-    CUDA_EVENT_SYNCHRONIZE(threadData->cmpStopEvent);
-    CUDA_EVENT_ELAPSED_TIME(&threadData->timeCmp, threadData->cmpStartEvent,
-      threadData->cmpStopEvent);
-    threadData->timeCmpSum += threadData->timeCmp;
-  }
-#endif /* HETM_LOG_TYPE == HETM_ADDR_LOG */
 
 #endif /* HETM_LOG_TYPE == HETM_BMAP_LOG */
   // gets the flag

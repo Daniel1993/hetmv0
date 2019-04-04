@@ -190,32 +190,6 @@ __global__ void HeTM_knl_earlyCheckTxCompressed(HeTM_knl_cmp_args_s args)
   checkTx_versionLOG(batchCount, sizeWSet, sizeRSet, idCPUThr, 0);
 }
 
-#if HETM_LOG_TYPE == HETM_ADDR_LOG
-// TODO: launch this after comparison
-__global__ void HeTM_knl_apply_cpu_data(int amount, size_t nbGranules)
-{
-  int id = blockIdx.x*blockDim.x+threadIdx.x;
-
-  PR_GRANULE_T *a = (PR_GRANULE_T*)HeTM_knl_global.devMemPoolBasePtr;
-  PR_GRANULE_T *b = (PR_GRANULE_T*)HeTM_knl_global.devMemPoolBackupBasePtr;
-  char *vers = (char*)HeTM_knl_global.versions;
-
-  // TODO: could use shared_memory + unified_memory
-
-  int i;
-for (i = 0; i < amount; ++i) {
-    int idx = id * amount + i;
-
-    if (idx > nbGranules) return; // exceeded array space
-
-    // check in bitmap if matches (if yes update GPU dataset)
-    if (vers[idx] == 1) {
-      a[idx] = b[idx]; // TODO: either missing vers[idx] OR error here
-    }
-  }
-}
-#endif
-
 __global__ void HeTM_knl_checkTxExplicit(HeTM_knl_cmp_args_s args)
 {
   HeTM_CPULogEntry *stm_log = (HeTM_CPULogEntry*)HeTM_knl_global.hostWSet; /* Host log */
@@ -265,165 +239,6 @@ __global__ void HeTM_knl_checkTxExplicit(HeTM_knl_cmp_args_s args)
 }
 
 // TODO: need comments
-#if HETM_LOG_TYPE == HETM_VERS2_LOG
-// entries_per_thread == LOG_SIZE*STM_LOG_BUFFER_SIZE
-__device__ void checkTx_versionLOG(
-  int batchCount,
-  int sizeWSet,
-  int entries_per_thread,
-  int idCPUThread,
-  int doApply
-) {
-  int id;
-  uintptr_t offset = 0;
-  HeTM_CPULogEntry *fetch_stm = NULL;
-  int i;
-
-  // this ID maps some positions in the dataset
-  id = blockIdx.x*blockDim.x+threadIdx.x;
-  offset = id * entries_per_thread;
-
-  if (id >= LOG_ACTUAL_SIZE) return; // Prime number
-
-  // Rset here is how many entries the thread is responsible for
-  // size_t nbGranules = HeTM_knl_global.nbGranules;
-  unsigned char *logBM = (unsigned char*)HeTM_knl_global.devRSet;
-  PR_GRANULE_T *a = (PR_GRANULE_T*)HeTM_knl_global.devMemPoolBasePtr;
-  long *vers = (long*)HeTM_knl_global.versions;
-  int isInterConfl = 0;
-
-  HeTM_CPULogEntry *stm_log = (HeTM_CPULogEntry*)HeTM_knl_global.hostWSet;
-
-  // TODO: init shared memory with default value (if default is not changed
-  // then do not copy to global memory) (CRASHES!)
-  const int maxCache = LOG_SIZE*LOG_THREADS_IN_BLOCK; // TODO: use shared 64*32 (128 threads each thread handles 32 tops)
-  __shared__ long cacheVersion[maxCache]; // NEED ADDRESS!!!!
-  __shared__ int cacheValue[maxCache];
-  // __shared__ long cacheAddr[maxCache]; // if not enough space go for private mem
-
-  // ---------------------------------------------------------------
-  // read from Global Memory
-  #pragma unroll
-  for (i = 0; i < LOG_SIZE; ++i) { // entries_per_thread == 16
-    cacheVersion[threadIdx.x + i*blockDim.x] = 0; // default version (apply always)
-    // cacheAddr[threadIdx.x + i*blockDim.x] = index;
-    // if (CPU_addr == (uintptr_t)-1 || CPU_addr == 0) {
-    //   cacheAddr[threadIdx.x + i*blockDim.x] = -1;
-    // }
-  }
-  __syncthreads();
-  // ---------------------------------------------------------------
-
-  #pragma unroll
-  for (i = 0; i < LOG_SIZE; ++i) { // entries_per_thread == 16 (else crashes)
-    fetch_stm = &(stm_log[id + i*LOG_ACTUAL_SIZE]);
-
-    // -------------------------------------------------------------
-    // Compute index
-    // uintptr_t CPU_addr = (uintptr_t)fetch_stm->pos; // TODO: now this is an offset
-    // uintptr_t DTST_offset = CPU_addr - (uintptr_t)HeTM_knl_global.hostMemPoolBasePtr;
-    // uintptr_t GPU_addr = DTST_offset + (uintptr_t)a;
-    // long index = DTST_offset >> PR_LOCK_GRAN_BITS;
-    long index = fetch_stm->pos;
-    // long condToIgnore = (CPU_addr == 0 || CPU_addr == (uintptr_t)-1);
-    long condToIgnore = (index == 0); // 0 is default value for empty
-    condToIgnore = ((condToIgnore | (-condToIgnore)) >> 63);
-    // long maskIgnore = -condToIgnore;
-    long maskIgnore = condToIgnore; // TODO: for some obscure reason this is -1
-
-    // applies -1 if address is invalid OR the index if valid
-    index = (maskIgnore & (long)-1L) | ((~maskIgnore) & (index-1));
-    // -------------------------------------------------------------
-
-    // if ((*HeTM_knl_global.isInterConfl) == 1) return;
-
-    long condIsIndexMinus1 = (index == -1);
-    long accessInByteMap = ((condIsIndexMinus1 | (-condIsIndexMinus1)) >> 63);
-    // fixedIndex for invalid entries --> 0 TS and val
-    long fixedIndex = ((~accessInByteMap) & index); // 0 or index
-    // if (index == -1) break;
-
-    int fetch_gpu = ByteM_GET_POS(fixedIndex, logBM);
-
-    isInterConfl = (fetch_gpu && !condIsIndexMinus1) || isInterConfl;
-
-    // ---------------------------------------------------------------
-    // if (ts > cacheTs) {
-    //   cacheVersion[threadIdx.x + i*blockDim.x] = fetch_stm->time_stamp;
-    //   cacheValue[threadIdx.x + i*blockDim.x] = fetch_stm->val;
-    // }
-    // ---------------------------------------------------------------
-    long cacheTs  = vers[fixedIndex];
-    long cacheVal = a[fixedIndex];
-
-    long condToApply = (fetch_stm->time_stamp > cacheTs); // 0 or 1
-    condToApply = (condToApply | (-condToApply)) >> 63;
-    // 0 (all bits 0, means keep prev) or -1 (all bits 1, means keep next)
-    // long maskApply = -condToApply;
-    long maskApply = condToApply; // TODO: for some obscure reason this is -1
-
-    // invalid entries, last value is applied
-    cacheVersion[threadIdx.x + i*blockDim.x] = ((~maskApply) & cacheTs) | (maskApply & fetch_stm->time_stamp);
-    cacheValue[threadIdx.x + i*blockDim.x] = ((~maskApply) & cacheVal) | (maskApply & fetch_stm->val);
-    // ---------------------------------------------------------------
-  }
-
-  // ---------------------------------------------------------------
-  __syncthreads();
-  #pragma unroll
-  for (i = 0; i < LOG_SIZE; ++i) { // entries_per_thread == 16
-    fetch_stm = &(stm_log[id + i*LOG_ACTUAL_SIZE]);
-
-    // -------------------------------------------------------------
-    // Compute index
-    uintptr_t CPU_addr = (uintptr_t)fetch_stm->pos;
-    uintptr_t DTST_offset = CPU_addr - (uintptr_t)HeTM_knl_global.hostMemPoolBasePtr;
-    // uintptr_t GPU_addr = DTST_offset + (uintptr_t)a;
-    long index = DTST_offset >> PR_LOCK_GRAN_BITS;
-    long condToIgnore = (CPU_addr == 0 || CPU_addr == (uintptr_t)-1);
-    condToIgnore = ((condToIgnore | (-condToIgnore)) >> 63);
-    // long maskIgnore = -condToIgnore;
-    long maskIgnore = condToIgnore; // TODO: for some obscure reason this is -1
-
-    // applies -1 if address is invalid OR the index if valid
-    index = (maskIgnore & (long)-1L) | ((~maskIgnore) & index);
-
-    // long index = cacheAddr[threadIdx.x + i*blockDim.x];
-    // if (index == -1) break;
-
-    long condIsIndexMinus1 = (index == -1);
-    long accessInByteMap = ((condIsIndexMinus1 | (-condIsIndexMinus1)) >> 63);
-    long fixedIndex = ((~accessInByteMap) & index);
-
-    // TODO: concurrent kernels!!!
-    // if(fixedIndex < 0 || fixedIndex > HeTM_knl_global.nbGranules) {
-    //   printf("invalid: index=%li, pos=%p\n", fixedIndex, (void*)CPU_addr);
-    // }
-    vers[fixedIndex] = cacheVersion[threadIdx.x + i*blockDim.x];
-    a[fixedIndex] = cacheValue[threadIdx.x + i*blockDim.x];
-
-    // long assumed, old;
-    // int oldVal;
-    // oldVal = a[index]; // TODO: this one is tricky --> is it atomic?
-    // old = vers[index];
-    // do {
-    //   if (cacheVersion[threadIdx.x + i*blockDim.x] < old) break;
-    //   assumed = old;
-    //   old = atomicCAS((unsigned long long int*)&(vers[index]),
-    //     (unsigned long long int)assumed,
-    //     (unsigned long long int)cacheVersion[threadIdx.x + i*blockDim.x]);
-    // } while (assumed != old);
-    // if (cacheVersion[threadIdx.x + i*blockDim.x] < old) continue;
-    // atomicCAS((int*)&a[index], oldVal, (int)cacheValue[threadIdx.x + i*blockDim.x]);
-  }
-
-  if (isInterConfl) {
-    *HeTM_knl_global.isInterConfl = 1;
-  }
-  // ---------------------------------------------------------------
-}
-
-#else /* HETM_LOG_TYPE != HETM_VERS2_LOG */
 __device__ void checkTx_versionLOG(
   int batchCount,
   int sizeWSet,
@@ -554,18 +369,8 @@ __device__ void applyHostWritesOnDev(
   //   // ------------------------------------------------------------------------
   //   // break;
   // }
-#elif HETM_LOG_TYPE == HETM_ADDR_LOG
-  char *vers = (char*)HeTM_knl_global.versions;
-  // TODO: doesn't work! there is some bug here!
-  // int mod = index & 0b11;
-  // int div = index >> 2;
-  // int res = 1 << mod;
-  // atomicOr((int*)&(vers[div<<2]), res);
-  vers[index] = 1; // in a final kernel merge with CPU dataset
 #endif
 }
-#endif /* HETM_LOG_TYPE == HETM_VERS2_LOG */
-
 #endif /* HETM_LOG_TYPE != HETM_BMAP_LOG */
 
 void HeTM_set_global_arg(HeTM_knl_global_s arg)

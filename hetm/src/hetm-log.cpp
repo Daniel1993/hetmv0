@@ -23,13 +23,7 @@ long *hetm_batchCount = 0;
 HETM_LOG_T* stm_log_init()
 {
   HETM_LOG_T *res = NULL;
-#if HETM_LOG_TYPE == HETM_VERS2_LOG
-  if (stm_thread_local_log != NULL) return stm_thread_local_log; // already init
-  res = (HETM_LOG_T*)malloc(sizeof(HETM_LOG_T));
-
-  MOD_CHUNKED_LOG_INIT(res, sizeof(HeTM_CPULogEntry), LOG_SIZE, LOG_ACTUAL_SIZE);
-  stm_thread_local_log = res;
-#elif HETM_LOG_TYPE != HETM_BMAP_LOG /* ADDR or VERS */
+#if HETM_LOG_TYPE != HETM_BMAP_LOG /* ADDR or VERS */
   if (stm_thread_local_log != NULL) return stm_thread_local_log; // already init
   res = (HETM_LOG_T*)malloc(sizeof(HETM_LOG_T));
 
@@ -70,7 +64,7 @@ stm_log_newentry(HETM_LOG_T *log, long* pos, int val, long vers)
   /* ********************************************** */
   // add entry in log
 
-#if HETM_LOG_TYPE == HETM_VERS_LOG || HETM_LOG_TYPE == HETM_VERS2_LOG
+#if HETM_LOG_TYPE == HETM_VERS_LOG
   uintptr_t base_addr = (uintptr_t)stm_baseMemPool;
   uintptr_t pos_addr = (uintptr_t)pos;
   uintptr_t pos_idx;
@@ -89,18 +83,9 @@ stm_log_newentry(HETM_LOG_T *log, long* pos, int val, long vers)
   // if (entry.pos == 29) { /* don't forget the +1 */
   //   printf("entry.pos =%i \n", entry.pos);
   // }
-#elif HETM_LOG_TYPE == HETM_ADDR_LOG
-  volatile HeTM_CPULogEntry entry;
-  entry.pos = (int*)pos;
 #endif /* HETM_LOG_TYPE == HETM_VERS_LOG */
 
-#if HETM_LOG_TYPE == HETM_VERS2_LOG
-// TODO: sizeof(PR_GRANULE_T)
-  uintptr_t wordAddr = ((uintptr_t)pos) / sizeof(int);
-  MOD_CHUNKED_LOG_APPEND(log, (void*)&entry, wordAddr);
-#else /* HETM_VERS_LOG */
   CHUNKED_LOG_APPEND(log, (void*)&entry);
-#endif /* HETM_LOG_TYPE == HETM_VERS2_LOG */
 
 #endif /* HETM_LOG_TYPE == HETM_BMAP_LOG */
 }

@@ -34,10 +34,6 @@ static void init_interConflFlag();
 
 #if HETM_LOG_TYPE == HETM_VERS_LOG
   static void init_vers(size_t pool_size);
-#elif  HETM_LOG_TYPE == HETM_VERS2_LOG
-  static void init_vers2(size_t pool_size);
-#elif  HETM_LOG_TYPE == HETM_ADDR_LOG
-  static void init_addr(size_t pool_size);
 #elif  HETM_LOG_TYPE == HETM_BMAP_LOG
   static void init_bmap(size_t pool_size);
 #endif
@@ -51,10 +47,6 @@ int HeTM_mempool_init(size_t pool_size)
 
 #if HETM_LOG_TYPE == HETM_VERS_LOG
   init_vers(pool_size);
-#elif  HETM_LOG_TYPE == HETM_VERS2_LOG
-  init_vers2(pool_size);
-#elif  HETM_LOG_TYPE == HETM_ADDR_LOG
-  init_addr(pool_size);
 #elif  HETM_LOG_TYPE == HETM_BMAP_LOG
   init_bmap(pool_size);
 #else /* HETM_LOG_TYPE not defined */
@@ -75,10 +67,8 @@ int HeTM_mempool_init(size_t pool_size)
 
   HeTM_set_global_arg((HeTM_knl_global_s){
     .devMemPoolBasePtr  = HeTM_shared_data.devMemPool,
-// #if HETM_LOG_TYPE == HETM_ADDR_LOG || HETM_LOG_TYPE == HETM_BMAP_LOG
     .devMemPoolBackupBasePtr = HeTM_shared_data.devMemPoolBackup,
     .devMemPoolBackupBmap = ((memman_bmap_s*)HeTM_shared_data.devMemPoolBackupBmap)->dev,
-// #endif
     .hostMemPoolBasePtr  = HeTM_shared_data.hostMemPool,
     .versions            = HeTM_shared_data.devVersions,
     .isInterConfl        = HeTM_shared_data.devInterConflFlag,
@@ -185,53 +175,7 @@ int HeTM_mempool_cpy_to_gpu(size_t *copiedSize, long batchCount)
   return 0; // TODO: error code
 }
 
-#if HETM_LOG_TYPE == HETM_VERS2_LOG
-void HeTM_wset_log_cpy_to_gpu(
-  HeTM_thread_s *threadData, chunked_log_node_s *node, size_t *size
-) {
-  char *buffer = node->chunk;
-  cudaStream_t stream = (cudaStream_t)threadData->stream;
-  int id = threadData->id;
-  size_t emptySpace;
-  size_t sizeOneChunk = STM_LOG_BUFFER_SIZE*LOG_SIZE*LOG_ACTUAL_SIZE*sizeof(HeTM_CPULogEntry);
-
-  void *ptrGPUBuffer = ((char*)HeTM_shared_data.wsetLog) + id * sizeOneChunk;
-
-  threadData->countCpy = 1; // TODO: start with big number
-  threadData->nbCpyDone = 0;
-  __sync_synchronize();
-  CUDA_EVENT_RECORD(threadData->cpyWSetStartEvent, stream);
-  // cudaMemset(ptrGPUBuffer, 0, sizeOneChunk); // sync
-
-  // int i;
-  // for (i = 0; i < STM_LOG_BUFFER_SIZE*LOG_SIZE*LOG_ACTUAL_SIZE; ++i) {
-  //   HeTM_CPULogEntry *entry = (HeTM_CPULogEntry*)(&buffer[i*sizeof(HeTM_CPULogEntry)]);
-  //   if (entry->pos != 0 && ((char*)entry->pos < (char*)HeTM_shared_data.hostMemPool ||
-  //       (char*)entry->pos > (char*)HeTM_shared_data.hostMemPool + HeTM_shared_data.sizeMemPool)) {
-  //     printf("wrong addr, i=%i, ptr=%p\n", i, entry->pos);
-  //   }
-  // }
-
-  CUDA_CPY_TO_DEV_ASYNC(ptrGPUBuffer, buffer, sizeOneChunk, stream);
-  HeTM_stats_data.sizeCpyLogs += sizeOneChunk;
-  // emptySpace = MOD_CHUNKED_LOG_NODE_FREE_SPACE(node);
-  // HeTM_stats_data.sizeCpyWSet += emptySpace;
-  if (threadData->isFirstChunk) {
-    threadData->emptySpaceFirstChunk += emptySpace;
-    threadData->isFirstChunk = 0;
-  }
-  CUDA_CHECK_ERROR(cudaStreamAddCallback(
-    stream, cpyCallback, threadData, 0
-  ), "");
-  COMPILER_FENCE();
-  if (threadData->nbCpyDone >= threadData->countCpy) {
-    threadData->isCpyDone = 1;
-  }
-  __sync_synchronize();
-  CUDA_EVENT_RECORD(threadData->cpyWSetStopEvent, stream);
-}
-
-#elif HETM_LOG_TYPE != HETM_BMAP_LOG
+#if HETM_LOG_TYPE != HETM_BMAP_LOG
 
 void HeTM_wset_log_cpy_to_gpu(
   HeTM_thread_s *threadData, chunked_log_node_s *node, size_t *size
@@ -520,9 +464,6 @@ static void init_RSetWSet(size_t pool_size) {
 #if HETM_LOG_TYPE != HETM_BMAP_LOG
     size_t sizeWSetBuffer = 0;
     sizeWSetBuffer = STM_LOG_BUFFER_SIZE*LOG_SIZE*sizeof(HeTM_CPULogEntry);
-#if HETM_LOG_TYPE == HETM_VERS2_LOG
-    sizeWSetBuffer *= LOG_ACTUAL_SIZE;
-#endif
     sizeWSetBuffer *= HeTM_shared_data.nbCPUThreads; // 1 buffer per thread
     memman_alloc_gpu("HeTM_host_wset", sizeWSetBuffer, NULL, 0);
     memman_zero_gpu(NULL);
@@ -605,50 +546,6 @@ static void init_bmap(size_t pool_size)
 }
 #endif /* HETM_LOG_TYPE == HETM_BMAP_LOG */
 
-#if HETM_LOG_TYPE == HETM_ADDR_LOG
-static void init_addr(size_t pool_size)
-{
-  size_t nbGranules = pool_size / PR_LOCK_GRANULARITY;
-  size_t granBmap;
-
-  // Inits mempool TODO!!! --> GPU also chunked
-  memman_alloc_dual("HeTM_mempool", pool_size, MEMMAN_NONE); // TODO: trade-offs with MEMMAN_UNIF
-  HeTM_shared_data.devMemPool  = memman_get_gpu(NULL);
-
-  // bmap for the data-set chunking
-  memman_create_bitmap(memman_get_cpu(NULL), memman_get_gpu(NULL), bitmapGran);
-  memman_bitmap_gpu(); // creates in GPU
-  memman_set_is_bmapped(0, 1);
-
-  memman_bmap_s *mainBMap = (memman_bmap_s*) memman_get_bmap(NULL);
-  memman_alloc_gpu("HeTM_mempool_bmap", sizeof(memman_bmap_s), mainBMap, MEMMAN_NONE);
-
-  memman_select("HeTM_mempool");
-  HeTM_shared_data.hostMemPool = memman_get_cpu(NULL);
-  HeTM_shared_data.devMemPoolBackup = memman_get_gpu(NULL);
-
-  memman_select("HeTM_mempool");
-  HeTM_shared_data.hostMemPool = memman_get_cpu(NULL);
-  // HeTM_shared_data.devMemPool  = memman_get_gpu(NULL);
-  HeTM_shared_data.sizeMemPool = pool_size;
-  stm_baseMemPool = HeTM_shared_data.hostMemPool;
-
-  // Inits versions buffer
-  // TODO: the versions array occupies more space than the dataset!!!
-
-  // TODO: I'm using the HeTM_versions in HETM_ADDR_LOG as CPU-WSet
-  size_t sizeVersion = nbGranules*sizeof(char); // WSet bmap
-  memman_alloc_gpu("HeTM_versions", sizeVersion, NULL, MEMMAN_NONE);
-  HeTM_shared_data.devVersions = memman_get_gpu(NULL);
-  memman_zero_gpu(NULL);
-
-  // Inits inter-conflict flag
-  memman_alloc_dual("HeTM_interConflFlag", sizeof(int), MEMMAN_NONE);
-  HeTM_shared_data.hostInterConflFlag = (int*)memman_get_cpu(NULL);
-  HeTM_shared_data.devInterConflFlag  = (int*)memman_get_gpu(NULL);
-}
-#endif /* HETM_LOG_TYPE == HETM_ADDR_LOG */
-
 #if HETM_LOG_TYPE == HETM_VERS_LOG
 static void init_vers(size_t pool_size) {
   size_t nbGranules = pool_size / PR_LOCK_GRANULARITY;
@@ -666,36 +563,3 @@ static void init_vers(size_t pool_size) {
   memman_zero_gpu(NULL);
 }
 #endif /* HETM_LOG_TYPE == HETM_VERS_LOG */
-
-#if HETM_LOG_TYPE == HETM_VERS2_LOG
-static void init_vers2(size_t pool_size) {
-  size_t nbGranules = pool_size / PR_LOCK_GRANULARITY;
-  size_t sizeRSetLog = 0;
-  size_t sizeWSetBuffer = 0;
-
-  // Inits mempool TODO!!! --> GPU also chunked
-  memman_alloc_dual("HeTM_mempool", pool_size, MEMMAN_NONE); // TODO: trade-offs with MEMMAN_UNIF
-  HeTM_shared_data.devMemPool  = memman_get_gpu(NULL);
-
-  // bmap for the data-set chunking
-  memman_create_bitmap(memman_get_cpu(NULL), memman_get_gpu(NULL), bitmapGran);
-  memman_bitmap_gpu(); // creates in GPU
-  memman_set_is_bmapped(0, 1);
-
-  memman_bmap_s *mainBMap = (memman_bmap_s*) memman_get_bmap(NULL);
-  memman_alloc_gpu("HeTM_mempool_bmap", sizeof(memman_bmap_s), mainBMap, MEMMAN_NONE);
-
-  memman_select("HeTM_mempool");
-  HeTM_shared_data.hostMemPool = memman_get_cpu(NULL);
-  // HeTM_shared_data.devMemPool  = memman_get_gpu(NULL);
-  HeTM_shared_data.sizeMemPool = pool_size;
-  stm_baseMemPool = HeTM_shared_data.hostMemPool;
-
-  // Inits versions buffer
-  size_t sizeVersion = nbGranules*sizeof(int32_t);
-  memman_alloc_gpu("HeTM_versions", sizeVersion, NULL, MEMMAN_NONE);
-  memman_select("HeTM_versions");
-  HeTM_shared_data.devVersions = memman_get_gpu(NULL);
-  memman_zero_gpu(NULL);
-}
-#endif /* HETM_LOG_TYPE == HETM_VERS2_LOG */

@@ -161,12 +161,7 @@ static void run_checkTxCompressed(knlman_callback_params_s params)
 
   CUDA_EVENT_RECORD(threadData->cmpStartEvent, stream);
   threadData->didCallCmp = 1;
-#if HETM_LOG_TYPE == HETM_VERS2_LOG
-  // TODO: init 32kB of shared memory (is it needed?)
   HeTM_knl_checkTxCompressed<<<blocks, threads, 0, stream>>>(data->knlArgs);
-#else
-  HeTM_knl_checkTxCompressed<<<blocks, threads, 0, stream>>>(data->knlArgs);
-#endif
   CUDA_EVENT_RECORD(threadData->cmpStopEvent, stream);
   CUDA_CHECK_ERROR(cudaStreamAddCallback(
     stream, cmpCallback, data->clbkArgs, 0
@@ -183,12 +178,7 @@ static void run_earlyCheckTxCompressed(knlman_callback_params_s params)
 
   CUDA_EVENT_RECORD(threadData->cmpStartEvent, stream);
   // threadData->didCallCmp = 1;
-#if HETM_LOG_TYPE == HETM_VERS2_LOG
-  // TODO:
-  exit(EXIT_FAILURE);
-#else
   HeTM_knl_earlyCheckTxCompressed<<<blocks, threads, 0, stream>>>(data->knlArgs);
-#endif
   CUDA_EVENT_RECORD(threadData->cmpStopEvent, stream);
   // CUDA_CHECK_ERROR(cudaStreamAddCallback(
   //   stream, cmpCallback, data->clbkArgs, 0

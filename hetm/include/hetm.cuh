@@ -237,9 +237,7 @@ void* HeTM_map_addr_to_cpu(void *origin);
 void HeTM_initCurandState();
 void HeTM_destroyCurandState();
 
-#if HETM_LOG_TYPE == HETM_VERS2_LOG
-void HeTM_wset_log_cpy_to_gpu(HeTM_thread_s*, chunked_log_node_s*, size_t*);
-#elif HETM_LOG_TYPE != HETM_BMAP_LOG
+#if HETM_LOG_TYPE != HETM_BMAP_LOG
 // returns 1 if out of space in the buffer (and does not copy)
 void HeTM_wset_log_cpy_to_gpu(HeTM_thread_s*, chunked_log_node_s*, size_t*);
 #endif /* HETM_LOG_TYPE != HETM_BMAP_LOG */

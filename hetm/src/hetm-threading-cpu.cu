@@ -185,29 +185,6 @@ static void exitThread(int id, void *data)
 static void asyncCpy(void *argsPtr)
 {
   HeTM_thread_s *threadData = (HeTM_thread_s*)argsPtr;
-#if HETM_LOG_TYPE == HETM_VERS2_LOG
-  // TODO: 64 == upper bound of threads
-  HETM_LOG_T truncated;
-
-  threadData->curWSetSize = STM_LOG_BUFFER_SIZE*LOG_SIZE*LOG_ACTUAL_SIZE*sizeof(HeTM_CPULogEntry);
-  truncated = MOD_CHUNKED_LOG_TRUNCATE(threadData->wSetLog, STM_LOG_BUFFER_SIZE);
-  threadData->truncated = truncated;
-
-  // size_t logSize=0;
-  // chunked_log_node_s *node = threadData->wSetLog->buckets;
-  // while (node != NULL) {
-  //   logSize++;
-  //   node = node->next;
-  // }
-  // printf("log size = %zu\n", logSize);
-
-  if (truncated.first != NULL) {
-    HeTM_wset_log_cpy_to_gpu(threadData, truncated.first, &threadData->curWSetSize);
-    CHUNKED_LOG_DESTROY(&truncated);
-  }
-  consecutiveFlagCpy = 0; // allow to cpy the flag
-  threadData->wSetLog->curr = truncated.first; // this one is to erase
-#else /* HETM_LOG_TYPE == HETM_VERS_LOG */
   // truncated = stm_log_truncate(threadData->wSetLog, &nbChunks);
   consecutiveFlagCpy = 0; // allow to cpy the flag
   size_t moreLog;
@@ -215,7 +192,6 @@ static void asyncCpy(void *argsPtr)
   threadData->curWSetSize += moreLog;
   // printf("!%i! sending %zu chunks\n", threadData->id, threadData->truncated.size);
   // printf(" ::: threadData->targetCopyNb = %i\n", threadData->targetCopyNb);
-#endif /* HETM_LOG_TYPE == HETM_VERS_LOG */
   HETM_DEB_THRD_CPU("[%i] Buffered WSet of size %zu\n", threadData->id, threadData->curWSetSize);
 
 #if HETM_CMP_TYPE == HETM_CMP_COMPRESSED && HETM_LOG_TYPE == HETM_VERS_LOG
@@ -413,11 +389,7 @@ static void cpyWSetToGPU()
 static void cmpBlockApply()
 {
   int i;
-#if HETM_LOG_TYPE == HETM_VERS2_LOG
-  size_t curNodeSize = !MOD_CHUNKED_LOG_IS_EMPTY(HeTM_thread_data->wSetLog);
-#else
   size_t curNodeSize = HeTM_thread_data->wSetLog->size;
-#endif
 
   HETM_DEB_THRD_CPU("Thread %i blocks and sends the Logs", HeTM_thread_data->id);
   // printf("Thread %i blocks and sends the Logs\n", HeTM_thread_data->id);
@@ -432,11 +404,7 @@ static void cmpBlockApply()
 
 //   HETM_DEB_THRD_CPU("Thread %i reachead CMP threshold WSetSize=%zu(x64k)",
 //     HeTM_thread_data->id, curNodeSize);
-// #if HETM_LOG_TYPE == HETM_VERS2_LOG
-//   if (MOD_CHUNKED_LOG_IS_EMPTY(HeTM_thread_data->wSetLog)) {
-// #else
 //   if (CHUNKED_LOG_IS_EMPTY(HeTM_thread_data->wSetLog)) {
-// #endif
 //     HeTM_thread_data->isCmpDone = 1;
 //     __sync_synchronize();
 //   }
@@ -455,11 +423,7 @@ static void cmpBlockApply()
     // must block
     i = 0;
     while (
-#if HETM_LOG_TYPE == HETM_VERS2_LOG
-      !MOD_CHUNKED_LOG_IS_EMPTY(HeTM_thread_data->wSetLog)
-#else
       !CHUNKED_LOG_IS_EMPTY(HeTM_thread_data->wSetLog)
-#endif
     ) {
       HeTM_thread_data->isCpyDone = 0;
       HeTM_thread_data->isCmpDone = 0;
@@ -641,16 +605,6 @@ static int launchCmpKernel(HeTM_thread_s *threadData, size_t wsetSize, int doApp
     },
     .clbkArgs = threadData
   };
-
-#if HETM_LOG_TYPE == HETM_VERS2_LOG
-  // size_t nbGranules = HeTM_shared_data.sizeMemPool / sizeof(PR_GRANULE_T);
-  size_t granPerThread = LOG_SIZE*STM_LOG_BUFFER_SIZE;
-  nbThreadsX = LOG_THREADS_IN_BLOCK;
-  bo = LOG_GPU_THREADS / nbThreadsX;
-
-  // number of entries for each thread
-  checkTxCompressed_args.knlArgs.sizeRSet = granPerThread;
-#endif /* HETM_LOG_TYPE == HETM_VERS2_LOG */
 
   dim3 blocksCheck(bo); // partition the stm_log by the different blocks
   dim3 threadsPerBlock(nbThreadsX); // each block has nbThreadsX threads

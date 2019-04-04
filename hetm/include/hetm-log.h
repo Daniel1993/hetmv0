@@ -10,17 +10,9 @@
 
 // TODO: these don't go through
 #define HETM_VERS_LOG  1
-#define HETM_ADDR_LOG  2
+#define HETM_ADDR_LOG  2 // not used anymore
 #define HETM_BMAP_LOG  3
-#define HETM_VERS2_LOG 4
-
-#if HETM_LOG_TYPE == HETM_VERS2_LOG
-#define LOG_ACTUAL_SIZE      4093 // 8191 /* closest Prime number */
-#define LOG_GPU_THREADS      4096 // 8192 /* LOG_THREADS_IN_BLOCK*... */
-#define LOG_THREADS_IN_BLOCK 128
-#define LOG_SIZE             32
-#define STM_LOG_BUFFER_SIZE  4 /* buffer capacity (times LOG_SIZE) */
-#else /* !HETM_VERS2_LOG */
+#define HETM_VERS2_LOG 4 // not used anymore
 
 #ifndef LOG_SIZE
 // #define LOG_SIZE             131072
@@ -31,8 +23,6 @@
 // #define STM_LOG_BUFFER_SIZE  1
 #define STM_LOG_BUFFER_SIZE  8 // 4 /* buffer capacity (times LOG_SIZE) */
 #endif /* STM_LOG_BUFFER_SIZE */
-
-#endif /* HETM_VERS2_LOG */
 
 // BMAP only
 #ifndef DEFAULT_BITMAP_GRANULARITY_BITS
@@ -48,25 +38,17 @@
 #define HETM_LOG_TYPE HETM_VERS_LOG
 #endif /* HETM_LOG_TYPE */
 
-#if HETM_LOG_TYPE == HETM_VERS_LOG || HETM_LOG_TYPE == HETM_VERS2_LOG
+#if HETM_LOG_TYPE == HETM_VERS_LOG
 typedef struct HeTM_CPULogEntry_t {
   volatile uint32_t pos;         /* Address written to --> offset */
   volatile uint32_t time_stamp;  /* Version counter    */
   volatile int32_t  val;         /* Value Written      */
 } __attribute__((packed)) HeTM_CPULogEntry; // in the GPU does not work!
-#elif HETM_LOG_TYPE == HETM_ADDR_LOG
-typedef struct HeTM_CPULogEntry_t {
-  int *pos;       /* Address written to */
-} HeTM_CPULogEntry;
 #else
 // no log entries
 #endif /* HETM_LOG_TYPE == HETM_VERS_LOG */
 
-#if HETM_LOG_TYPE == HETM_VERS2_LOG
-#define HETM_LOG_T mod_chunked_log_s
-#else /* HETM_LOG_TYPE != HETM_VERS2_LOG */
 #define HETM_LOG_T chunked_log_s
-#endif  /* HETM_LOG_TYPE */
 
 extern __thread HETM_LOG_T *stm_thread_local_log;
 
@@ -99,13 +81,11 @@ static inline size_t stm_log_size(chunked_log_node_s *node)
 }
 
 /* Read the log */
-#if HETM_LOG_TYPE != HETM_VERS2_LOG
 static inline chunked_log_node_s* stm_log_truncate(HETM_LOG_T *log, int *nbChunks)
 {
   HETM_LOG_T truncated = CHUNKED_LOG_TRUNCATE(log, STM_LOG_BUFFER_SIZE, nbChunks);
   return truncated.first;
 }
-#endif
 
 static inline void stm_log_node_free(chunked_log_node_s *node)
 {
@@ -116,11 +96,7 @@ static inline void stm_log_node_free(chunked_log_node_s *node)
 static inline void stm_log_free(HETM_LOG_T *log)
 {
   if (log != NULL) {
-#if HETM_LOG_TYPE == HETM_VERS2_LOG
-    MOD_CHUNKED_LOG_DESTROY(log);
-#else
     CHUNKED_LOG_DESTROY(log);
-#endif
   }
   // CHUNKED_LOG_TEARDOWN(); // TODO: implement thread-local chunk_nodes
   stm_thread_local_log = NULL;
@@ -184,9 +160,6 @@ stm_log_newentry(HETM_LOG_T *log, long* pos, int val, long vers);
 //     .time_stamp = (uint32_t)vers,
 //     .val = (int32_t)val,
 //   };
-// #elif HETM_LOG_TYPE == HETM_ADDR_LOG
-//   volatile HeTM_CPULogEntry entry;
-//   entry.pos = (int*)pos;
 // #endif /* HETM_LOG_TYPE == HETM_VERS_LOG */
 //
 // #if HETM_LOG_TYPE == HETM_VERS2_LOG
