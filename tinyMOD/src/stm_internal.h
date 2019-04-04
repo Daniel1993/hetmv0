@@ -86,11 +86,11 @@
 #define TX_GET                          stm_tx_t *tx = tls_get_tx()
 
 #ifndef RW_SET_SIZE
-# define RW_SET_SIZE                    4096                /* Initial size of read/write sets */
+# define RW_SET_SIZE                    1024                /* Initial size of read/write sets */
 #endif /* ! RW_SET_SIZE */
 
 #ifndef LOCK_ARRAY_LOG_SIZE
-# define LOCK_ARRAY_LOG_SIZE            20                  /* Size of lock array: 2^20 = 1M */
+# define LOCK_ARRAY_LOG_SIZE            15                  /* Size of lock array: 2^20 = 1M */
 #endif /* LOCK_ARRAY_LOG_SIZE */
 
 #ifndef LOCK_SHIFT_EXTRA
@@ -102,7 +102,7 @@
 #  define MIN_BACKOFF                   (1UL << 2)
 # endif /* MIN_BACKOFF */
 # ifndef MAX_BACKOFF
-#  define MAX_BACKOFF                   (1UL << 31)
+#  define MAX_BACKOFF                   (1UL << 11)
 # endif /* MAX_BACKOFF */
 #endif /* CM == CM_BACKOFF */
 

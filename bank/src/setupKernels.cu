@@ -43,7 +43,7 @@ int HeTM_setup_memcdReadTx(int nbBlocks, int nbThreads)
 
 int HeTM_bankTx_cpy_IO() // TODO: not used
 {
-  PR_retrieveIO(&HeTM_pr_args, NULL);
+  PR_retrieveIO(&HeTM_pr_args);
   return 0;
 }
 
@@ -112,7 +112,7 @@ static void run_bankTx(knlman_callback_params_s params)
 
   // CUDA_CHECK_ERROR(cudaDeviceSynchronize(), ""); // sync the previous run
 
-  cudaFuncSetCacheConfig(bankTx, cudaFuncCachePreferL1);
+  // cudaFuncSetCacheConfig(bankTx, cudaFuncCachePreferL1);
 
   if (a == NULL) {
     // This seems to swap the buffers if given a NULL array...
@@ -133,12 +133,20 @@ static void run_bankTx(knlman_callback_params_s params)
 
   input->input_buffer = GPUInputBuffer;
   input->output_buffer = GPUoutputBuffer;
-  memman_cpy_to_gpu(NULL, NULL, *hetm_batchCount);
+
+  memman_cpy_to_gpu(PR_getCurrentStream(), NULL, *hetm_batchCount);
 
   // TODO: change PR-STM to use knlman
   // PR_blockNum = params.blocks.x;
   // PR_threadNum = params.threads.x;
-  PR_run(bankTx, &HeTM_pr_args, NULL);
+
+  PR_run(bankTx, &HeTM_pr_args);
+
+  // PR_i_cudaPrepare((&HeTM_pr_args), bankTx);
+	// PR_BEFORE_RUN_EXT((&HeTM_pr_args));
+	// // PR_i_run(pr_args);
+  // bankTx<<<PR_blockNum,PR_threadNum,0,(cudaStream_t)kernelStream>>>(HeTM_pr_args.dev);
+	// PR_AFTER_RUN_EXT((&HeTM_pr_args));
 }
 
 static void run_memcdReadTx(knlman_callback_params_s params)
@@ -182,7 +190,7 @@ static void run_memcdReadTx(knlman_callback_params_s params)
   input->curr_clock = (int*)memman_get_gpu(NULL);
 
   memman_select("HeTM_memcdTx_input");
-  memman_cpy_to_gpu(NULL, NULL, *hetm_batchCount);
+  memman_cpy_to_gpu(PR_getCurrentStream(), NULL, *hetm_batchCount);
 
   // TODO:
   // inputDev = (HeTM_memcdTx_input_s*)memman_ad_hoc_alloc(NULL, &input, sizeof(HeTM_memcdTx_input_s));
@@ -196,7 +204,7 @@ static void run_memcdReadTx(knlman_callback_params_s params)
   outBuf.buf = NULL;
   outBuf.size = 0;
   PR_prepareIO(&HeTM_pr_args, inBuf, outBuf);
-  PR_run(memcdReadTx, &HeTM_pr_args, NULL);
+  PR_run(memcdReadTx, &HeTM_pr_args);
 }
 
 static void run_memcdWriteTx(knlman_callback_params_s params)
@@ -235,7 +243,7 @@ static void run_memcdWriteTx(knlman_callback_params_s params)
   input->curr_clock = (int*)memman_get_gpu(NULL);
 
   memman_select("HeTM_memcdTx_input");
-  memman_cpy_to_gpu(NULL, NULL, *hetm_batchCount);
+  memman_cpy_to_gpu(PR_getCurrentStream(), NULL, *hetm_batchCount);
 
   // TODO: change PR-STM to use knlman
   // PR_blockNum = params.blocks.x;
@@ -245,5 +253,5 @@ static void run_memcdWriteTx(knlman_callback_params_s params)
   outBuf.buf = NULL;
   outBuf.size = 0;
   PR_prepareIO(&HeTM_pr_args, inBuf, outBuf);
-  PR_run(memcdWriteTx, &HeTM_pr_args, NULL);
+  PR_run(memcdWriteTx, &HeTM_pr_args);
 }

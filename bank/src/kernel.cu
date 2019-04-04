@@ -58,6 +58,8 @@ typedef struct offload_bank_tx_thread_ {
 // static int kernelLaunched = 0;
 static TIMER_T beginTimer;
 
+extern pr_tx_args_s HeTM_pr_args; // TODO: in hetm-threading-gpu.cu
+
 static void offloadBankTxThread(void *argsPtr); // bank_tx
 
 /* ################################################################################################# *
@@ -151,12 +153,12 @@ int jobWithCuda_run(cuda_t *d, account_t *a) // TODO: memcd
   offload_thread_args.a = a;
 
   // TODO: if overlap kernel
-  // offloadBankTxThread((void*)&offload_thread_args);
+  offloadBankTxThread((void*)&offload_thread_args);
 
-  HeTM_async_request((HeTM_async_req_s){
-    .args = (void*)&offload_thread_args,
-    .fn = offloadBankTxThread
-  });
+  // HeTM_async_request((HeTM_async_req_s){
+  //   .args = (void*)&offload_thread_args,
+  //   .fn = offloadBankTxThread
+  // });
   return 1;
 }
 
@@ -242,6 +244,7 @@ void jobWithCuda_exit(cuda_t * d)
 
   // cudaDeviceSynchronize waits for the kernel to finish, and returns
   // any errors encountered during the launch.
+
   cudaStatus = cudaDeviceSynchronize();
   if (cudaStatus != cudaSuccess) {
     printf("cudaDeviceSynchronize returned error code: %d\n", cudaStatus);
@@ -267,36 +270,22 @@ static void offloadBankTxThread(void *argsPtr)
   cuda_t *d = args->d;
   account_t *a = args->a;
 
-  bool err = 1;
-  cudaError_t cudaStatus;
+  CUDA_CHECK_ERROR(cudaSetDevice(DEVICE_ID), "");
 
-  while (err) {
-    err = 0;
+  knlman_select("HeTM_bankTx");
+  knlman_set_nb_blocks(d->blockNum, 1, 1);
+  knlman_set_nb_threads(d->threadNum, 1, 1);
 
-    CHECK_ERROR_CONTINUE(cudaSetDevice(DEVICE_ID));
+  HeTM_bankTx_s bankTx_args = {
+    .knlArgs = {
+      .d = d,
+      .a = a,
+    },
+    .clbkArgs = NULL
+  };
+  knlman_set_entry_object(&bankTx_args);
+  knlman_run(NULL); // stream is defined on PR_STM
 
-    knlman_select("HeTM_bankTx");
-    knlman_set_nb_blocks(d->blockNum, 1, 1);
-    knlman_set_nb_threads(d->threadNum, 1, 1);
-
-    HeTM_bankTx_s bankTx_args = {
-      .knlArgs = {
-        .d = d,
-        .a = a,
-      },
-      .clbkArgs = NULL
-    };
-    knlman_set_entry_object(&bankTx_args);
-    knlman_run(NULL);
-    // kernelLaunched = 1;
-    // __sync_synchronize();
-    // printf(" ------------------------ \n");
-
-    //Check for errors
-    cudaStatus = cudaGetLastError();
-  }
-
-  if (cudaStatus != cudaSuccess) {
-    printf("\nTransaction kernel launch failed. Error code: %s.\n", cudaGetErrorString(cudaStatus));
-  }
+  //Check for errors
+  CUDA_CHECK_ERROR(cudaGetLastError(), "");
 }

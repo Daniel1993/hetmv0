@@ -219,10 +219,13 @@ struct thread_data {
 	int access_offset;
 
 	long CPU_backoff;
+	long GPU_backoff;
 	long GPU_batch_duration;
 
 	double GPU_steal_prob;
 	double CPU_steal_prob;
+
+	float timeBudget;
 
 	TIMER_T start;
 	TIMER_T end;
@@ -352,7 +355,7 @@ int bank_sum(bank_t *bank);
 
 
 #define IS_INTERSECT_HIT(r) \
-	((double)((int)(r)%100000)/100000.0 < P_INTERSECT)
+	((double)((unsigned)(r)%100000)/100000.0 < P_INTERSECT)
 //
 #define RANDOM_ACCESS(r, bot, top) ({ \
 	long _top = (top); \
@@ -421,5 +424,8 @@ int bank_sum(bank_t *bank);
 void call_cuda_check_memcd(PR_GRANULE_T* keys, size_t size);
 void call_cuda_check_keys_memcd(PR_GRANULE_T* gpuMempool, size_t sizePool,
   int *inputKeys, int *outputFound, size_t sizeInput);
+
+int transfer2(account_t *accounts, volatile unsigned *positions, int isInter, int count, int tid, int nbAccounts);
+int readOnly2(account_t *accounts, volatile unsigned *positions, int isInter, int count, int tid, int nbAccounts);
 
 #endif /* BANK_H */

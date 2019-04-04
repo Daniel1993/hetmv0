@@ -9,22 +9,18 @@
 #include "hetm-cmp-kernels.cuh"
 #include "bank_aux.h"
 #include "CheckAllFlags.h"
-#include "zipf_dist.hpp"
 
 /* ################################################################### *
 * GLOBALS
 * ################################################################### */
 
-// static std::random_device randDev{};
-static std::mt19937 generator;
-static zipf_distribution<int, double> *zipf_dist = NULL;
+thread_local static std::random_device randDev{};
+thread_local static std::mt19937 generator{randDev()};
+thread_local static std::geometric_distribution<> *distGen;
 
 // global
 thread_data_t parsedData;
 int isInterBatch = 0;
-size_t accountsSize;
-size_t sizePool;
-void* gpuMempool;
 
 // -----------------------------------------------------------------------------
 const size_t NB_OF_BUFFERS = 2; // 2 good + 2 bad
@@ -42,254 +38,314 @@ static size_t maxGPUoutputBufferSize;
 static size_t size_of_GPU_input_buffer, size_of_CPU_input_buffer;
 static int lockOutputBuffer = 0;
 
-FILE *GPU_input_file = NULL;
-FILE *CPU_input_file = NULL;
+static const int PAGE_SIZE = 4096; // TODO: this is also defined in hetm proj (CACHE_GRANULE_SIZE)
 
-// TODO: break the dataset
-// static cudaStream_t *streams;
 // -----------------------------------------------------------------------------
 
-// TODO: input <isSET, key, val>
-// 	int setKernelPerc = parsedData.set_percent;
+#define INTEREST_RATE 0.5
 
-// TODO: memory access
+#define COMPUTE_TRANSFER(val) \
+	val // TODO: do math that does not kill the final result
 
 static int fill_GPU_input_buffers()
 {
 	int buffer_last = size_of_GPU_input_buffer/sizeof(int);
-	GPU_input_file = fopen(parsedData.GPUInputFile, "r");
-
-	if (zipf_dist == NULL) {
-		generator.seed(input_seed);
-		zipf_dist = new zipf_distribution<int, double>(parsedData.nb_accounts * parsedData.num_ways);
-	}
 
 	memman_select("GPU_input_buffer_good");
 	int *cpu_ptr = (int*)memman_get_cpu(NULL);
 
-// #if BANK_PART == 3
-	// unsigned rnd = 12345723; //RAND_R_FNC(input_seed);
-	unsigned rnd; // = (*zipf_dist)(generator);
+	int nbPages = parsedData.nb_accounts / PAGE_SIZE;
+	// if (parsedData.nb_accounts % PAGE_SIZE) nbPages++;
+
+#if BANK_PART == 1
+	unsigned rnd = RAND_R_FNC(input_seed);
 	for (int i = 0; i < buffer_last; ++i) {
-		fscanf(GPU_input_file, "%i\n", &rnd); // RAND_R_FNC(input_seed);
-		cpu_ptr[i] = rnd; // GPU_ACCESS(rnd, parsedData.nb_accounts) + (i * parsedData.nb_accounts); // not the same key
-		cpu_ptr[i] &= (unsigned)-2;
+		unsigned j = rnd % parsedData.nb_accounts;
+		int target_page = (j / parsedData.GPUthreadNum) % nbPages;
+		int access = (j % PAGE_SIZE) + target_page * PAGE_SIZE;
+		cpu_ptr[i] = access;
+		cpu_ptr[i] &= (unsigned)-2; // get even accounts
+		rnd += parsedData.access_offset * 2; // TODO: 2 is sizeof TX
 	}
 
 	memman_select("GPU_input_buffer_bad");
 	cpu_ptr = (int*)memman_get_cpu(NULL);
 
-	// cpu_ptr[0] = 0; // deterministic abort
-	for (int i = 0; i < buffer_last; ++i) {
-		fscanf(GPU_input_file, "%i\n", &rnd); // RAND_R_FNC(input_seed);
-		cpu_ptr[i] = rnd; // INTERSECT_ACCESS_GPU(rnd, parsedData.nb_accounts) + (i * parsedData.nb_accounts);
+	cpu_ptr[0] = 0; // deterministic intersection
+	rnd = RAND_R_FNC(input_seed);
+	for (int i = 1; i < buffer_last; ++i) {
+		unsigned j = rnd % parsedData.nb_accounts;
+		int target_page = (j / parsedData.GPUthreadNum) % nbPages;
+		int access = (j % PAGE_SIZE) + target_page * PAGE_SIZE;
+		cpu_ptr[i] = access;
+		cpu_ptr[i] &= (unsigned)-2; // get even accounts
+		rnd += parsedData.access_offset * 2; // TODO: 2 is sizeof TX
 	}
+#else /* Uniform at random */
+	for (int i = 0; i < buffer_last; ++i) {
+		unsigned rnd = RAND_R_FNC(input_seed);
+		unsigned j = rnd % parsedData.nb_accounts;
+		int target_page = (j / parsedData.GPUthreadNum) % nbPages;
+		int access = (j % PAGE_SIZE) + target_page * PAGE_SIZE;
+		cpu_ptr[i] = access;
+		cpu_ptr[i] &= (unsigned)-2; // get even accounts
+	}
+
+	memman_select("GPU_input_buffer_bad");
+	cpu_ptr = (int*)memman_get_cpu(NULL);
+
+	cpu_ptr[0] = 0; // deterministic intersection
+	for (int i = 1; i < buffer_last; ++i) {
+		unsigned rnd = RAND_R_FNC(input_seed);
+		unsigned j = rnd % parsedData.nb_accounts;
+		int target_page = (j / parsedData.GPUthreadNum) % nbPages;
+		int access = (j % PAGE_SIZE) + target_page * PAGE_SIZE;
+		cpu_ptr[i] = access;
+		cpu_ptr[i] &= (unsigned)-2; // get even accounts
+	}
+#endif /* BANK_PART == 1 */
 }
 
 static int fill_CPU_input_buffers()
 {
 	int good_buffers_last = size_of_CPU_input_buffer/sizeof(int);
 	int bad_buffers_last = 2*size_of_CPU_input_buffer/sizeof(int);
-	CPU_input_file = fopen(parsedData.CPUInputFile, "r");
 
-	if (zipf_dist == NULL) {
-		generator.seed(input_seed);
-		zipf_dist = new zipf_distribution<int, double>(parsedData.nb_accounts * parsedData.num_ways);
+	// TODO: make the CPU access the end --> target_page * PAGE_SIZE - access
+
+	int nbPages = parsedData.nb_accounts / PAGE_SIZE;
+	// if (parsedData.nb_accounts % PAGE_SIZE) nbPages++;
+	// TODO: if the last page is incomplete it is never accessed
+
+#if BANK_PART == 1
+
+	unsigned rnd = RAND_R_FNC(input_seed);
+	for (int i = 0; i < good_buffers_last; ++i) {
+		unsigned j = rnd % parsedData.nb_accounts;
+		int target_page = (j / parsedData.nb_threadsCPU) % nbPages;
+		int access = (j % PAGE_SIZE) + target_page * PAGE_SIZE;
+		CPUInputBuffer[i] = access;
+		CPUInputBuffer[i] |= 1; // get odd accounts
+		rnd += parsedData.access_offset * 2; // TODO: 2 is sizeof TX
 	}
+	// for (int i = 0; i < parsedData.nb_threadsCPU; ++i) {
+	// 	CPUInputBuffer[good_buffers_last + i*NB_CPU_TXS_PER_THREAD] = i; // deterministic intersection
+	// }
+	rnd = RAND_R_FNC(input_seed);
+	for (int i = good_buffers_last; i < bad_buffers_last; ++i) {
+		unsigned j = rnd % parsedData.nb_accounts;
+		int target_page = (j / parsedData.nb_threadsCPU) % nbPages;
+		int access = (j % PAGE_SIZE) + target_page * PAGE_SIZE;
+		CPUInputBuffer[i] = access;
+		CPUInputBuffer[i] |= 1; // get odd accounts
+		rnd += parsedData.access_offset * 2; // TODO: 2 is sizeof TX
+	}
+#else /* BANK_PART != 3 */
+	for (int i = 0; i < good_buffers_last; ++i) {
+		unsigned rnd = RAND_R_FNC(input_seed);
+		unsigned j = rnd % parsedData.nb_accounts;
+		int target_page = (j / parsedData.nb_threadsCPU) % nbPages;
+		int access = (j % PAGE_SIZE) + target_page * PAGE_SIZE;
+		CPUInputBuffer[i] = access;
+		CPUInputBuffer[i] |= 1; // get odd accounts
+	}
+	// for (int i = 0; i < parsedData.nb_threadsCPU; ++i) {
+	// 	CPUInputBuffer[good_buffers_last + i*NB_CPU_TXS_PER_THREAD] = i; // deterministic intersection
+	// }
+	for (int i = good_buffers_last; i < bad_buffers_last; ++i) {
+		unsigned rnd = RAND_R_FNC(input_seed);
+		unsigned j = rnd % parsedData.nb_accounts;
+		int target_page = (j / parsedData.nb_threadsCPU) % nbPages;
+		int access = (j % PAGE_SIZE) + target_page * PAGE_SIZE;
+		CPUInputBuffer[i] = access;
+		CPUInputBuffer[i] |= 1; // get odd accounts
+	}
+#endif /* BANK_PART == 3 */
+}
+
+static inline int total(bank_t *bank, int transactional)
+{
+  long i;
+  long total;
+
+  if (!transactional) {
+    total = 0;
+    for (i = 0; i < bank->size; i++) {
+      total += bank->accounts[i];
+    }
+  } else {
+    TM_START(1, RO);
+    total = 0;
+    for (i = 0; i < bank->size; i++) {
+      total += TM_LOAD(&bank->accounts[i]);
+    }
+    TM_COMMIT;
+  }
+
+  return total;
+}
+
+static inline int transfer(account_t *accounts, volatile int *positions, int count, int amount)
+{
+  int i;
+	uintptr_t load1, load2;
+  int z = 0;
+  int n, src, dst;
+
+  for (n = 0; n < count; n += 2) {
+    src = positions[n];
+    dst = positions[n+1];
+		// printf ("%i -- %i\n", positions[n], positions[n+1]);
+    if (src < 0 || dst < 0) {
+      return 0;
+    }
+    i += accounts[src];
+    i += accounts[dst];
+  }
+
+  /* Allow overdrafts */
+  TM_START(z, RW);
+
+  for (n = 0; n < count; n += 2) {
+    src = positions[n];
+    dst = positions[n+1];
+
+		// Problem: TinySTM works with the granularity of 8B, PR-STM works with 4B
+    load1 = TM_LOAD(&accounts[src]);
+    load1 -= COMPUTE_TRANSFER(amount);
+
+    load2 = TM_LOAD(&accounts[dst]);
+    load2 += COMPUTE_TRANSFER(amount);
+
+		TM_STORE(&accounts[src], load1);
+    TM_STORE(&accounts[dst], load2);
+  }
+
+  TM_COMMIT;
+
+  // TODO: remove this
+//   volatile int j = 0;
+// loop:
+//   j++;
+//   if (j < 100) goto loop;
+
+  return amount;
+}
+
+static inline int transferReadOnly(account_t *accounts, volatile int *positions, int count, int amount)
+{
+  int i;
+	uintptr_t load1, load2;
+  int z = 0;
+  int n, src, dst;
+
+  for (n = 0; n < count; n += 2) {
+    src = positions[n];
+    dst = positions[n+1];
+		// printf ("%i -- %i\n", positions[n], positions[n+1]);
+    if (src < 0 || dst < 0) {
+      return 0;
+    }
+    i += accounts[src];
+    i += accounts[dst];
+  }
+
+  /* Allow overdrafts */
+  TM_START(z, RW);
+
+  for (n = 0; n < count; n += 2) {
+    src = positions[n];
+    dst = positions[n+1];
+
+    load1 = TM_LOAD(&accounts[src]);
+    load1 -= COMPUTE_TRANSFER(amount);
+
+    load2 = TM_LOAD(&accounts[dst]);
+    load2 += COMPUTE_TRANSFER(amount);
+
+		// TM_STORE(&accounts[src], load1);
+    // TM_STORE(&accounts[dst], load2);
+  }
+  TM_COMMIT;
+  return load1 + load2;
+}
+
+static inline int readIntensive(account_t *accounts, volatile int *positions, int count, int amount)
+{
+  int i;
+  int z;
+  int n;
+	int loads[count];
+	float res = 0;
+	int resI = 0;
+
+  // for (n = 0; n < count; ++n) {
+  //   z = positions[n];
+  //   i += accounts[z]; // prefetch
+  // }
+
+  /* Allow overdrafts */
+	z = 0;
+  TM_START(z, RW);
+
+  for (n = 0; n < count; ++n) {
+    loads[n] = TM_LOAD(&accounts[positions[n]]);
+		res += loads[n] * INTEREST_RATE;
+  }
+	res += amount;
+	resI = (int)res;
+
+	TM_STORE(&accounts[positions[0]], resI);
+	// accounts[positions[0]] = resI;
+
+  TM_COMMIT;
 
 // #if BANK_PART == 3
-	for (int i = 0; i < good_buffers_last; ++i) {
-		// unsigned rnd = (*zipf_dist)(generator); // RAND_R_FNC(input_seed);
-		unsigned rnd;
-		fscanf(CPU_input_file, "%i\n", &rnd); // RAND_R_FNC(input_seed);
-		CPUInputBuffer[i] = rnd; // CPU_ACCESS(rnd, parsedData.nb_accounts) + (i * parsedData.nb_accounts);
-		CPUInputBuffer[i] |= 1;
-	}
-	// CPUInputBuffer[good_buffers_last] = 0; // deterministic abort
-	for (int i = good_buffers_last; i < bad_buffers_last; ++i) {
-		// unsigned rnd = (*zipf_dist)(generator); // RAND_R_FNC(input_seed);
-		unsigned rnd; // RAND_R_FNC(input_seed);
-		fscanf(CPU_input_file, "%i\n", &rnd); // RAND_R_FNC(input_seed);
-		CPUInputBuffer[i] = rnd; // INTERSECT_ACCESS_CPU(rnd, parsedData.nb_accounts) + (i * parsedData.nb_accounts);
-		// CPUInputBuffer[i] |= 1;
-	}
+//   // TODO: BANK_PART 3 benifits VERS somehow
+  // volatile int j = 0;
+	// loop:
+	//   j++;
+	//   if (j < 150) goto loop;
+// #endif /* BANK_PART == 3 */
+  return amount;
 }
 
-memcd_get_output_t cpu_GET_kernel(memcd_t *memcd, int *input_key, unsigned input_clock)
+static inline int readOnly(account_t *accounts, volatile int *positions, int count, int amount)
 {
-	// const int size_of_hash = 16;
-  int z = 0;
-  // char key[size_of_hash]; // assert(sizeof(char) == 1)
-	// uintptr_t hash[2]; // assert(sizeof(uintptr_t) == 8)
-	size_t modHash, setIdx;
-  memcd_get_output_t response;
-	int key = *input_key;
+  int i;
+  int z;
+  int n;
+	int loads[count];
+	float res = 0;
+	int resI = 0;
 
-	// 1) hash key
-	modHash = key;
-	// TODO: this would be nice, but we lose control of where the key goes to
-	// memset(key, 0, size_of_hash);
-	// memcpy(key, input_key, sizeof(int));
-	// MurmurHash3_x64_128(key, size_of_hash, 0, hash);
-	// modHash = hash[0];
-	// modHash += hash[1];
-
-	// 2) setIdx <- hash % nbSets
-	setIdx = modHash % memcd->nbSets;
-	setIdx = setIdx * memcd->nbWays;
-
-  /* Allow overdrafts */
+	z = 0;
   TM_START(z, RW);
 
-	// 3) find in set the key, if not found write not found in the output
-	for (int i = 0; i < memcd->nbWays; ++i)
-	{
-		size_t newIdx = setIdx + i;
-		int readState = TM_LOAD(&memcd->state[newIdx]);
-		int readKey   = TM_LOAD(&memcd->key[newIdx]);
-		if ((readState & MEMCD_VALID) && readKey == key) {
-			// found it!
-			int readVal = TM_LOAD(&memcd->val[newIdx]);
-			int* volatile ptr_ts = &memcd->ts[newIdx];
-			TM_STORE(ptr_ts, input_clock); // TODO: set state to isRead
-			response.isFound = 1;
-			response.value   = readVal;
-			break;
-		}
-	}
-	TM_COMMIT;
+  for (n = 0; n < count; ++n) {
+    loads[n] = TM_LOAD(&accounts[positions[n]]);
+		res += loads[n] * INTEREST_RATE;
+  }
+	res += amount;
+	resI = (int)res;
 
-  return response;
+	// TM_STORE(&accounts[positions[0]], resI);
+	// accounts[positions[0]] = resI;
+
+  TM_COMMIT;
+
+  return amount;
 }
 
-void cpu_SET_kernel(memcd_t *memcd, int *input_key, int *input_value, unsigned input_clock)
+static inline void reset(bank_t *bank)
 {
-	// const int size_of_hash = 16;
-  int z = 0;
-  // char key[size_of_hash]; // assert(sizeof(char) == 1)
-	// uintptr_t hash[2]; // assert(sizeof(uintptr_t) == 8)
-	size_t modHash, setIdx;
-  memcd_get_output_t response;
-	volatile int key = *input_key;
-	volatile int val = *input_value;
+  long i;
 
-	// 1) hash key
-	modHash = key;
-	// TODO: this would be nice, but we lose control of where the key goes to
-	// memset(key, 0, size_of_hash);
-	// memcpy(key, input_key, sizeof(int));
-	// MurmurHash3_x64_128(key, size_of_hash, 0, hash);
-	// modHash = hash[0];
-	// modHash += hash[1];
-
-	// 2) setIdx <- hash % nbSets
-	setIdx = modHash % memcd->nbSets;
-	setIdx = setIdx * memcd->nbWays;
-
-  /* Allow overdrafts */
-  TM_START(z, RW);
-
-	// 3) find in set the key, if not found write not found in the output
-	int idxFound = -1;
-	int idxEvict = -1;
-	int isInCache = 0;
-	unsigned TS   = (unsigned)-1; // largest TS
-	for (int i = 0; i < memcd->nbWays; ++i)
-	{
-		size_t newIdx = setIdx + i;
-		int readState = TM_LOAD(&memcd->state[newIdx]);
-		if (((readState & MEMCD_VALID) == 0) && idxFound == -1) {
-			// found empty spot
-			idxFound = i;
-			continue;
-		}
-		int readKey = TM_LOAD(&memcd->key[newIdx]);
-		if (readKey == key && ((readState & MEMCD_VALID) != 0)) {
-			// found the key in the cache --> just use this spot
-			isInCache = 1;
-			idxFound = i;
-			break;
-		}
-		unsigned readTS = TM_LOAD(&memcd->ts[newIdx]);
-		if (readTS < TS) { // look for the older entry
-			TS = readTS;
-			idxEvict = i;
-		}
-	}
-	size_t newIdx;
-	if (idxFound == -1) {
-		newIdx = setIdx + idxEvict;
-	} else {
-		newIdx = setIdx + idxFound;
-	}
-	int* volatile ptr_ts = &memcd->ts[newIdx]; // TODO: optimizer screws the ptrs
-	int* volatile ptr_val = &memcd->val[newIdx];
-	TM_STORE(ptr_ts, input_clock);
-	TM_STORE(ptr_val, val);
-	if (!isInCache) {
-		volatile int newState = MEMCD_VALID|MEMCD_WRITTEN;
-		int* volatile ptr_key = &memcd->key[newIdx];
-		int* volatile ptr_state = &memcd->state[newIdx];
-		TM_STORE(ptr_key, key);
-		TM_STORE(ptr_state, newState);
-	}
-	TM_COMMIT;
-}
-
-void cpu_SET_kernel_NOTX(memcd_t *memcd, int *input_key, int *input_value, unsigned input_clock)
-{
-	size_t modHash, setIdx;
-	memcd_get_output_t response;
-	int key = *input_key;
-	int val = *input_value;
-
-	// 1) hash key
-	modHash = key;
-
-	// 2) setIdx <- hash % nbSets
-	setIdx = modHash % memcd->nbSets;
-	setIdx = setIdx * memcd->nbWays;
-
-	// 3) find in set the key, if not found write not found in the output
-	int idxFound = -1;
-	int idxEvict = -1;
-	int isInCache = 0;
-	unsigned TS   = (unsigned)-1; // largest TS
-	for (int i = 0; i < memcd->nbWays; ++i)
-	{
-		size_t newIdx = setIdx + i;
-		int readState = memcd->state[newIdx];
-		if (((readState & MEMCD_VALID) == 0) && idxFound == -1) {
-			// found empty spot
-			idxFound = i;
-			continue;
-		}
-		int readKey = memcd->key[newIdx];
-		if (readKey == key && ((readState & MEMCD_VALID) != 0)) {
-			// found the key in the cache --> just use this spot
-			isInCache = 1;
-			idxFound = i;
-			break;
-		}
-		unsigned readTS = memcd->ts[newIdx];
-		if (readTS < TS) { // look for the older entry
-			TS = readTS;
-			idxEvict = i;
-		}
-	}
-	size_t newIdx;
-	if (idxFound == -1) {
-		newIdx = setIdx + idxEvict;
-	} else {
-		newIdx = setIdx + idxFound;
-	}
-	memcd->ts[newIdx] = input_clock;
-	memcd->val[newIdx] = val;
-	if (!isInCache) {
-		int newState = MEMCD_VALID|MEMCD_WRITTEN;
-		memcd->key[newIdx] = key;
-		memcd->state[newIdx] = newState;
-	}
+  TM_START(2, RW);
+  for (i = 0; i < bank->size; i++) {
+    TM_STORE(&bank->accounts[i], 0);
+  }
+  TM_COMMIT;
 }
 
 /* ################################################################### *
@@ -298,37 +354,49 @@ void cpu_SET_kernel_NOTX(memcd_t *memcd, int *input_key, int *input_value, unsig
 
 static void test(int id, void *data)
 {
-  thread_data_t *d = &((thread_data_t *)data)[id];
-  cuda_t       *cd = d->cd;
-  memcd_t   *memcd = d->memcd;
-
-  int input_key;
-  int input_val;
-
-  int nbSets = memcd->nbSets;
-  int nbWays = memcd->nbWays;
+  thread_data_t    *d = &((thread_data_t *)data)[id];
+  cuda_t          *cd = d->cd;
+  account_t *accounts = d->bank->accounts;
+  volatile int accounts_vec[d->trfs*20];
+  int nb_accounts = d->bank->size;
   unsigned rnd;
 	int rndOpt = RAND_R_FNC(d->seed);
+	int rndOpt2 = RAND_R_FNC(d->seed);
 	static thread_local int curr_tx = 0;
+	static thread_local volatile int resReadOnly = 0;
 
-	// TODO: this goes into the input
-	float setKernelPerc = parsedData.set_percent * 1000;
+#if BANK_PART == 2
+  rnd = (unsigned)d->hprob;
+#else
+  rnd = (*distGen)(generator);
+#endif
 
 	int good_buffers_start = 0;
 	int bad_buffers_start = size_of_CPU_input_buffer/sizeof(int);
-
 	int buffers_start = isInterBatch ? bad_buffers_start : good_buffers_start;
-	input_key = CPUInputBuffer[buffers_start+id*NB_CPU_TXS_PER_THREAD + curr_tx];
-	input_val = input_key;
+	int index = buffers_start+id*NB_CPU_TXS_PER_THREAD + curr_tx;
+	accounts_vec[0] = CPUInputBuffer[index];
+	if (rndOpt % 100 < d->nb_read_intensive) {
+		// BANK_PREPARE_READ_INTENSIVE(d->id, d->seed, rnd, d->hmult, d->nb_threads, accounts_vec, nb_accounts);
+		// TODO: change the buffers
+		for (int i = 1; i < d->read_intensive_size; ++i)
+			accounts_vec[i] = accounts_vec[i-1] + 2; // only odd accounts
 
-	/* 100% * 1000*/
-	if (rndOpt % 100000 < setKernelPerc) {
-		// Set kernel
-		cpu_SET_kernel(d->memcd, &input_key, &input_val, *d->memcd->globalTs);
+		if (rndOpt2 % 100 < d->prec_write_txs) {
+			// 1% readIntensive
+			readIntensive(d->bank->accounts, accounts_vec, d->read_intensive_size, 1);
+		} else {
+			resReadOnly += readOnly(d->bank->accounts, accounts_vec, d->read_intensive_size, 1);
+		}
 	} else {
-		// Get kernel
-		memcd_get_output_t res; // TODO: write it in the output buffer
-		res = cpu_GET_kernel(d->memcd, &input_key, *d->memcd->globalTs);
+		// BANK_PREPARE_TRANSFER(d->id, d->seed, rnd, d->hmult, d->nb_threads, accounts_vec, nb_accounts);
+		for (int i = 1; i < d->trfs*2; ++i)
+			accounts_vec[i] = accounts_vec[i-1] + parsedData.access_offset;
+		if (rndOpt2 % 100 < d->prec_write_txs) {
+			transfer(d->bank->accounts, accounts_vec, d->trfs, 1);
+		} else {
+			transferReadOnly(d->bank->accounts, accounts_vec, d->trfs, 1);
+		}
 	}
 	curr_tx += 1;
 	curr_tx = curr_tx % NB_CPU_TXS_PER_THREAD;
@@ -340,8 +408,7 @@ static void test(int id, void *data)
 static void beforeCPU(int id, void *data)
 {
   thread_data_t *d = &((thread_data_t *)data)[id];
-	// also, setup the memory
-	// call_cuda_check_memcd((int*)gpuMempool, accountsSize/sizeof(int));
+  distGen = new std::geometric_distribution<>(parsedData.stddev);
 }
 
 static void afterCPU(int id, void *data)
@@ -358,16 +425,7 @@ static void afterCPU(int id, void *data)
 
 static void before_batch(int id, void *data)
 {
-	thread_local static unsigned long seed = 0x0012112A3112514A;
-	isInterBatch = RAND_R_FNC(seed) % 100 < parsedData.shared_percent;
-	__sync_synchronize();
-
-	if (isInterBatch) {
-		memman_select("GPU_input_buffer_bad");
-	} else {
-		memman_select("GPU_input_buffer_good");
-	}
-	memman_cpy_to_gpu(NULL, NULL, *hetm_batchCount);
+	// TODO: moved to GPU callback
 }
 
 static void after_batch(int id, void *data)
@@ -407,13 +465,20 @@ static void test_cuda(int id, void *data)
 {
   thread_data_t    *d = &((thread_data_t *)data)[id];
   cuda_t          *cd = d->cd;
-  account_t *base_ptr = d->memcd->key;
+  account_t *accounts = d->bank->accounts;
 
-	*(d->memcd->globalTs) += 1;
-	memman_select("memcd_global_ts");
-	memman_cpy_to_gpu(NULL, NULL, *hetm_batchCount);
+	thread_local static unsigned long seed = 0x0012112A3112514A;
+	isInterBatch = IS_INTERSECT_HIT( RAND_R_FNC(seed) );
+	__sync_synchronize();
 
-  jobWithCuda_runMemcd(d, cd, base_ptr, *(d->memcd->globalTs));
+	if (isInterBatch) {
+		memman_select("GPU_input_buffer_bad");
+	} else {
+		memman_select("GPU_input_buffer_good");
+	}
+	memman_cpy_to_gpu(HeTM_memStream2, NULL, *hetm_batchCount);
+
+  jobWithCuda_run(cd, accounts);
 }
 
 static void afterGPU(int id, void *data)
@@ -443,6 +508,8 @@ static void afterGPU(int id, void *data)
   d->max_retries               = HeTM_stats_data.timeGPU; // TODO:
   printf("nb_transfer=%li\n", d->nb_transfer);
   printf("nb_batches=%li\n", d->nb_aborts_locked_read);
+  printf(" <<<<<<<< PR-STM aborts=%12li\n", HeTM_stats_data.nbAbortsGPU);
+  printf(" <<<<<<< PR-STM commits=%12li\n", HeTM_stats_data.nbCommittedTxsGPU);
 
   // leave this one
   printf("CUDA thread terminated after %li(%li successful) run(s). \nTotal cuda execution time: %f ms.\n",
@@ -457,13 +524,14 @@ static void afterGPU(int id, void *data)
 
 int main(int argc, char **argv)
 {
-  memcd_t *memcd;
+  bank_t *bank;
   // barrier_t cuda_barrier;
   int i, j, ret = -1;
   thread_data_t *data;
   pthread_t *threads;
   barrier_t barrier;
   sigset_t block_set;
+  size_t accountsSize;
 
   memset(&parsedData, 0, sizeof(thread_data_t));
 
@@ -474,20 +542,15 @@ int main(int argc, char **argv)
   bank_parseArgs(argc, argv, &parsedData);
 
 	// ---------------------------------------------------------------------------
-	maxGPUoutputBufferSize = parsedData.GPUthreadNum*parsedData.GPUblockNum*parsedData.trans;
+	// --- prototype (meaning shitty code)
+	maxGPUoutputBufferSize = parsedData.GPUthreadNum*parsedData.GPUblockNum*sizeof(int);
 	currMaxCPUoutputBufferSize = maxGPUoutputBufferSize; // realloc on full
 
-	// malloc_or_die(streams, parsedData.trans);
-	// for (int i = 0; i < parsedData.trans; ++i) {
-	// 	cudaStreamCreate(streams + i);
-	// }
-	// parsedData.streams = streams;
-
 	// malloc_or_die(GPUoutputBuffer, maxGPUoutputBufferSize);
-	memman_alloc_dual("GPU_output_buffer", maxGPUoutputBufferSize*sizeof(memcd_get_output_t), 0);
+	memman_alloc_dual("GPU_output_buffer", maxGPUoutputBufferSize, 0);
 	GPUoutputBuffer = (int*)memman_get_gpu(NULL);
 
-	size_of_GPU_input_buffer = maxGPUoutputBufferSize*sizeof(int);
+	size_of_GPU_input_buffer = maxGPUoutputBufferSize*parsedData.trans;
 
 	// TODO: this parsedData.nb_threads is what comes of the -n input
 	size_of_CPU_input_buffer = parsedData.nb_threads*sizeof(int) * NB_CPU_TXS_PER_THREAD;
@@ -529,16 +592,8 @@ int main(int argc, char **argv)
     .isGPUEnabled = 1
 #endif
   });
-
-	memman_alloc_dual("memcd_global_ts", sizeof(unsigned), 0);
-
-	malloc_or_die(memcd, 1);
-	memcd->nbSets = parsedData.nb_accounts;
-	memcd->nbWays = parsedData.num_ways;
-	memcd->globalTs = (unsigned*)memman_get_cpu(NULL);
-	accountsSize = memcd->nbSets*memcd->nbWays*sizeof(account_t);
-	sizePool = accountsSize * 4;
-  HeTM_mempool_init(sizePool); // <K,V,TS,STATE>
+  accountsSize = parsedData.nb_accounts*sizeof(account_t);
+  HeTM_mempool_init(accountsSize);
 
   // TODO:
   parsedData.nb_threadsCPU = HeTM_shared_data.nbCPUThreads;
@@ -553,26 +608,20 @@ int main(int argc, char **argv)
   jobWithCuda_exit(NULL); // Reset Cuda Device
 
   malloc_or_die(threads, parsedData.nb_threads);
-
-	// mallocs 4 arrays (accountsSize * NUMBER_WAYS * 4)
-  HeTM_alloc((void**)&memcd->key, &gpuMempool, sizePool); // <K,V,TS,STATE>
-	memcd->val   = memcd->key + (memcd->nbSets*memcd->nbWays);
-	memcd->ts    = memcd->val + (memcd->nbSets*memcd->nbWays);
-	memcd->state = memcd->ts  + (memcd->nbSets*memcd->nbWays);
-
-  memset(memcd->key, 0, sizePool);
-  parsedData.memcd = memcd;
+  malloc_or_die(bank, 1);
+  HeTM_alloc((void**)&bank->accounts, (void**)&bank->devAccounts, accountsSize);
+  bank->size = parsedData.nb_accounts;
+	memset(bank->accounts, 0, parsedData.nb_accounts * sizeof(account_t));
+  printf("Total before   : %d (array ptr=%p size=%zu)\n", total(bank, 0),
+		bank->accounts, parsedData.nb_accounts * sizeof(account_t));
+  parsedData.bank = bank;
 
   DEBUG_PRINT("Initializing GPU.\n");
 
   cuda_t *cuda_st;
-  cuda_st = jobWithCuda_init(memcd->key, parsedData.nb_threadsCPU,
-    sizePool, parsedData.trans, 0, parsedData.GPUthreadNum, parsedData.GPUblockNum,
+  cuda_st = jobWithCuda_init(bank->accounts, parsedData.nb_threadsCPU,
+    bank->size, parsedData.trans, 0, parsedData.GPUthreadNum, parsedData.GPUblockNum,
     parsedData.hprob, parsedData.hmult);
-
-  jobWithCuda_initMemcd(cuda_st, parsedData.num_ways, parsedData.nb_accounts,
-    parsedData.set_percent, parsedData.shared_percent);
-	cuda_st->memcd_array_size = accountsSize;
 
   parsedData.cd = cuda_st;
   //DEBUG_PRINT("Base: %lu %lu \n", bank->accounts, &bank->accounts);
@@ -583,26 +632,6 @@ int main(int argc, char **argv)
 
   /* Init STM */
   printf("Initializing STM\n");
-
-	/* POPULATE the cache */
-	for (int i = 0; i < size_of_CPU_input_buffer/sizeof(int); ++i) {
-		cpu_SET_kernel_NOTX(memcd, &CPUInputBuffer[i], &CPUInputBuffer[i], 0);
-	}
-	memman_select("GPU_input_buffer_good");
-	int *gpu_buffer_cpu_ptr = (int*)memman_get_cpu(NULL);
-	for (int i = 0; i < size_of_GPU_input_buffer/sizeof(int); ++i) {
-		cpu_SET_kernel_NOTX(memcd, &gpu_buffer_cpu_ptr[i], &gpu_buffer_cpu_ptr[i], 0);
-	}
-
-	// for (int i = 0; i < 32*4; ++i) {
-	// 	printf("%i : KEY=%i STATE=%i\n", i, memcd->key[i], memcd->state[i]);
-	// }
-
-	CUDA_CPY_TO_DEV(gpuMempool, memcd->key, sizePool);
-	// printf(" >>>>>>>>>>>>>>> PASSOU AQUI!!!\n");
-	// call_cuda_check_memcd((int*)gpuMempool, accountsSize/sizeof(int));
-	// TODO: does not work: need to set the bitmap in order to copy
-	// HeTM_mempool_cpy_to_gpu(NULL); // copies the populated cache to GPU
 
   TM_INIT(parsedData.nb_threads);
   // ###########################################################################
@@ -626,7 +655,7 @@ int main(int argc, char **argv)
       parsedData.nb_aborts_2 = 0;
       memcpy(&data[i], &parsedData, sizeof(thread_data_t));
       data[i].id      = i;
-      data[i].seed    = input_seed * (i ^ 12345); // rand();
+      data[i].seed    = rand();
       data[i].cd      = cuda_st;
     }
     // ### end create threads
@@ -667,14 +696,10 @@ int main(int argc, char **argv)
     bank_printStats(&parsedData);
   }
 
-	// for (int i = 0; i < memcd->nbSets; ++i) {
-	// 	for (int j = 0; j < memcd->nbWays; ++j) {
-	// 		printf("%i ", memcd->key[i*memcd->nbSets + j]);
-	// 	}
-	// 	printf("\n");
+	// for (int i = 0; i < bank->size; ++i) {
+	// 	printf("[%i]=%i ", i, bank->accounts[i]);
 	// }
-
-	// call_cuda_check_memcd((int*)gpuMempool, accountsSize/sizeof(int));
+	// printf("\n");
 
   /* Cleanup STM */
   TM_EXIT();
@@ -687,7 +712,7 @@ int main(int argc, char **argv)
 
   /* Delete bank and accounts */
   HeTM_mempool_destroy();
-  free(memcd);
+  free(bank);
 
   free(threads);
   free(data);

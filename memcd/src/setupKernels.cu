@@ -5,19 +5,9 @@
 
 extern pr_tx_args_s HeTM_pr_args; // TODO: in hetm-threading-gpu.cu
 
-static void run_bankTx(knlman_callback_params_s params);
 static void run_memcdReadTx(knlman_callback_params_s params);
 static void run_memcdWriteTx(knlman_callback_params_s params);
 static void run_finalTxLog2(knlman_callback_params_s params);
-
-int HeTM_setup_bankTx(int nbBlocks, int nbThreads)
-{
-  PR_blockNum = nbBlocks;
-  PR_threadNum = nbThreads;
-  memman_alloc_dual("HeTM_bankTxInput", sizeof(HeTM_bankTx_input_s), 0);
-  knlman_create("HeTM_bankTx", run_bankTx, 0);
-  return 0;
-}
 
 int HeTM_setup_memcdWriteTx(int nbBlocks, int nbThreads)
 {
@@ -43,7 +33,7 @@ int HeTM_setup_memcdReadTx(int nbBlocks, int nbThreads)
 
 int HeTM_bankTx_cpy_IO() // TODO: not used
 {
-  PR_retrieveIO(&HeTM_pr_args, NULL);
+  PR_retrieveIO(&HeTM_pr_args);
   return 0;
 }
 
@@ -93,54 +83,6 @@ static void run_finalTxLog2(knlman_callback_params_s params)
   // HeTM_knl_finalTxLog2<<<blocks, threads>>>(data->knlArgs);
 }
 
-static void run_bankTx(knlman_callback_params_s params)
-{
-  HeTM_bankTx_s *data = (HeTM_bankTx_s*)params.entryObj;
-  account_t *a = data->knlArgs.a;
-  account_t *accounts = a;
-  cuda_t *d = data->knlArgs.d;
-  pr_buffer_s inBuf, outBuf;
-  HeTM_bankTx_input_s *input, *inputDev;
-
-  cudaSetDevice(0);
-
-  // thread_local static unsigned long seed = 0x3F12514A3F12514A;
-
-  memman_select("HeTM_bankTxInput");
-  input    = (HeTM_bankTx_input_s*)memman_get_cpu(NULL);
-  inputDev = (HeTM_bankTx_input_s*)memman_get_gpu(NULL);
-
-  // CUDA_CHECK_ERROR(cudaDeviceSynchronize(), ""); // sync the previous run
-
-  cudaFuncSetCacheConfig(bankTx, cudaFuncCachePreferL1);
-
-  if (a == NULL) {
-    // This seems to swap the buffers if given a NULL array...
-    accounts = d->dev_a;
-    d->dev_a = d->dev_b;
-    d->dev_b = accounts;
-  }
-
-  input->accounts = d->dev_a; // a; // d->dev_a;
-  input->is_intersection = isInterBatch;
-  input->nbAccounts = d->size;
-
-  inBuf.buf = (void*)inputDev;
-  inBuf.size = sizeof(HeTM_bankTx_input_s);
-  outBuf.buf = NULL;
-  outBuf.size = 0;
-  PR_prepareIO(&HeTM_pr_args, inBuf, outBuf);
-
-  input->input_buffer = GPUInputBuffer;
-  input->output_buffer = GPUoutputBuffer;
-  memman_cpy_to_gpu(NULL, NULL, *hetm_batchCount);
-
-  // TODO: change PR-STM to use knlman
-  // PR_blockNum = params.blocks.x;
-  // PR_threadNum = params.threads.x;
-  PR_run(bankTx, &HeTM_pr_args, NULL);
-}
-
 static void run_memcdReadTx(knlman_callback_params_s params)
 {
   HeTM_bankTx_s *data = (HeTM_bankTx_s*)params.entryObj; // TODO
@@ -187,7 +129,7 @@ static void run_memcdReadTx(knlman_callback_params_s params)
   input->curr_clock = (int*)memman_get_gpu(NULL);
 
   memman_select("HeTM_memcdTx_input");
-  memman_cpy_to_gpu(NULL, NULL, *hetm_batchCount);
+  memman_cpy_to_gpu(HeTM_memStream2, NULL, *hetm_batchCount);
 
   // TODO:
   // inputDev = (HeTM_memcdTx_input_s*)memman_ad_hoc_alloc(NULL, &input, sizeof(HeTM_memcdTx_input_s));
@@ -201,7 +143,7 @@ static void run_memcdReadTx(knlman_callback_params_s params)
   outBuf.buf = NULL;
   outBuf.size = 0;
   PR_prepareIO(&HeTM_pr_args, inBuf, outBuf);
-  PR_run(memcdReadTx, &HeTM_pr_args, NULL);
+  PR_run(memcdReadTx, &HeTM_pr_args);
 }
 
 static void run_memcdWriteTx(knlman_callback_params_s params)
@@ -244,7 +186,7 @@ static void run_memcdWriteTx(knlman_callback_params_s params)
   input->curr_clock = (int*)memman_get_gpu(NULL);
 
   memman_select("HeTM_memcdTx_input");
-  memman_cpy_to_gpu(NULL, NULL, *hetm_batchCount);
+  memman_cpy_to_gpu(HeTM_memStream2, NULL, *hetm_batchCount);
 
   // TODO: change PR-STM to use knlman
   // PR_blockNum = params.blocks.x;
@@ -254,5 +196,5 @@ static void run_memcdWriteTx(knlman_callback_params_s params)
   outBuf.buf = NULL;
   outBuf.size = 0;
   PR_prepareIO(&HeTM_pr_args, inBuf, outBuf);
-  PR_run(memcdWriteTx, &HeTM_pr_args, NULL);
+  PR_run(memcdWriteTx, &HeTM_pr_args);
 }

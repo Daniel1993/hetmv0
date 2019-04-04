@@ -10,7 +10,7 @@ filename_tiny="Bank_Tiny"
 GPU_PART="1.0"
 CPU_PART="0.0"
 P_INTERSECT="0.0"
-DURATION=10000
+DURATION=20000
 BLOCKS="2 4 8 16 32 64 256 512 1024" # 512
 THREADS="512" #"2 4 8 16 32 64 96 256 320 512 640 768 1024"
 BATCH_SIZE="4"
@@ -37,12 +37,12 @@ function doRunLargeDTST {
 		for blocks in 20 40 80 160 320 640
 		do
 			#for threads in 32 64 128 256 512 640 768 896 1024
-			for threads in 32 64 96 128 160 192 224 256 288 320 352 384 416 448 480 512 576 640 704 768 832 896 928 992 1024
+			for threads in 128 192 256 384 512 768 1024
 			do
-				for txs in 1 2 4 8 16 32 64
+				for txs in 1
 				do
 					timeout 30s ./bank -n $CPU_THREADS -b $blocks -x $threads \
-						-a $LARGE_DATASET -d $DURATION -R 0 -S 16 -l 10 -N 1 -T $txs CPU_BACKOFF=50
+						-a $LARGE_DATASET -d $DURATION -R 0 -S 2 -l 100 -N 1 -T $txs CPU_BACKOFF=1
 				done
 			done
 		done
@@ -260,3 +260,6 @@ doRunLargeDTST GPUonly_cont_sep_BMAP_large_s
 # DATASET=$SMALL_DATASET
 # doRunSmallDTST BMAP_cont_sep_small_s
 # ###########################################################################
+
+mkdir -p array_batch_size
+mv *_s* array_batch_size

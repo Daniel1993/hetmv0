@@ -97,7 +97,6 @@ $(APP): $(OBJS)
 		CFG=$(CFG) \
 		PROFILE=$(PROFILE) \
 		INST_CPU=$(INST_CPU) \
-		HETM_DISABLE_CHUNKS=$(DHETM_DISABLE_CHUNKS) \
 		DISABLE_NON_BLOCKING=$(DISABLE_NON_BLOCKING) \
 		PRINT_DEB=$(PRINT_DEB)
 	@echo " ============================================ "
@@ -110,7 +109,6 @@ $(APP): $(OBJS)
 		LOG_TYPE=$(LOG_TYPE) \
 		PR_MAX_RWSET_SIZE=$(PR_MAX_RWSET_SIZE) \
 		CFG=$(CFG) \
-		HETM_DISABLE_CHUNKS=$(DHETM_DISABLE_CHUNKS) \
 		INST_CPU=$(INST_CPU) \
 		PRINT_DEB=$(PRINT_DEB)
 	@echo " ============================================ "
@@ -124,7 +122,6 @@ $(APP): $(OBJS)
 		PR_MAX_RWSET_SIZE=$(PR_MAX_RWSET_SIZE) \
 		CFG=$(CFG) \
 		INST_CPU=$(INST_CPU) \
-		HETM_DISABLE_CHUNKS=$(DHETM_DISABLE_CHUNKS) \
 		PRINT_DEB=$(PRINT_DEB)
 	@echo " ============================================ "
 	@echo " === Building HeTM lib (again) "
@@ -138,7 +135,6 @@ $(APP): $(OBJS)
 		CFG=$(CFG) \
 		PROFILE=$(PROFILE) \
 		INST_CPU=$(INST_CPU) \
-		HETM_DISABLE_CHUNKS=$(DHETM_DISABLE_CHUNKS) \
 		PRINT_DEB=$(PRINT_DEB)
 	@echo "Linking..."
 	### TODO: optimization breaks performance

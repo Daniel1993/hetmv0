@@ -177,5 +177,5 @@ static void offloadEmptyTxThread(void *argsPtr)
   extern pr_tx_args_s HeTM_pr_args;
 
   CUDA_CHECK_ERROR(cudaSetDevice(DEVICE_ID), "");
-  PR_run(emptyKernelTx, &HeTM_pr_args, NULL);
+  PR_run(emptyKernelTx, &HeTM_pr_args);
 }

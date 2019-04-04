@@ -100,7 +100,7 @@ cuda_t *jobWithCuda_init(account_t *accounts, int nbCPUThreads, int size, int tr
   // Init check Tx kernel
   // TODO: init EXPLICIT
   HeTM_setup_finalTxLog2();
-  HeTM_setup_bankTx(cuda_info.blockNum, cuda_info.threadNum);
+  // HeTM_setup_bankTx(cuda_info.blockNum, cuda_info.threadNum);
 
   HeTM_initCurandState();
 
@@ -244,7 +244,7 @@ void jobWithCuda_exit(cuda_t * d)
     printf("cudaDeviceSynchronize returned error code: %d\n", cudaStatus);
   }
 
-  if(d != NULL) {
+  if (d != NULL) {
     HeTM_destroy();
     HeTM_destroyCurandState();
     PR_teardown();
@@ -284,7 +284,7 @@ static void offloadBankTxThread(void *argsPtr)
       .clbkArgs = NULL
     };
     knlman_set_entry_object(&bankTx_args);
-    knlman_run(NULL);
+    knlman_run(NULL); // stream is defined on PR_STM
     // kernelLaunched = 1;
     // __sync_synchronize();
     // printf(" ------------------------ \n");

@@ -84,6 +84,7 @@ __global__ void HeTM_knl_writeTxBitmap(HeTM_knl_cmp_args_s args, size_t offset);
 #if HETM_LOG_TYPE != HETM_BMAP_LOG
 // problems compiling the log
 __global__ void HeTM_knl_checkTxCompressed(HeTM_knl_cmp_args_s args);
+__global__ void HeTM_knl_earlyCheckTxCompressed(HeTM_knl_cmp_args_s args);
 __global__ void HeTM_knl_checkTxExplicit(HeTM_knl_cmp_args_s args);
 #endif /* HETM_LOG_TYPE != HETM_BMAP_LOG */
 

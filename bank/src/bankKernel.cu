@@ -18,6 +18,7 @@
 
 #include "pr-stm-wrapper.cuh" // enables the granularity
 #include "pr-stm-internal.cuh"
+#include "setupKernels.cuh"
 
 #define INTEREST_RATE 0.5 // bank readIntensive transaction
 #define FULL_MASK 0xffffffff
@@ -39,6 +40,8 @@ __constant__ __device__ float hmult;
 __constant__ __device__ int   read_intensive_size;
 
 __constant__ __device__ thread_data_t devParsedData;
+
+__constant__ __device__ int PR_maxNbRetries = 16;
 
 /****************************************************************************
  *	KERNELS
@@ -140,6 +143,15 @@ __device__ void readIntensive_tx(PR_txCallDefArgs, int txCount)
 	int tot_nb_threads = blockDim.x*gridDim.x;
 	// int need_to_extra_read = 1;
 
+	HeTM_GPU_log_s *GPU_log = (HeTM_GPU_log_s*)args.pr_args_ext;
+	long *state = GPU_log->state;
+	volatile int seedState;
+
+	// TODO: new parameter for the spins
+	for (i = 0; i < devParsedData.GPU_backoff; i++) {
+		state[id] += id + 1234 * i;
+	}
+
 	// TODO:
 	// random_KernelReadIntensive(PR_txCallArgs, idx, nbAccounts, is_intersection);
 
@@ -157,9 +169,8 @@ __device__ void readIntensive_tx(PR_txCallDefArgs, int txCount)
 
 #ifndef BANK_DISABLE_PRSTM
 	int nbRetries = 0;
-	const int maxNbRetries = 100;
 	PR_txBegin();
-	if (nbRetries++ > maxNbRetries) break;
+	if (nbRetries++ > PR_maxNbRetries) break;
 #endif /* BANK_DISABLE_PRSTM */
 
 	// reads the accounts first, then mutates the locations
@@ -218,6 +229,15 @@ __device__ void readOnly_tx(PR_txCallDefArgs, int txCount)
 	int option = PR_rand(INT_MAX);
 	int tot_nb_threads = blockDim.x*gridDim.x;
 
+	HeTM_GPU_log_s *GPU_log = (HeTM_GPU_log_s*)args.pr_args_ext;
+	long *state = GPU_log->state;
+	volatile int seedState;
+
+	// TODO: new parameter for the spins
+	for (i = 0; i < devParsedData.GPU_backoff; i++) {
+		state[id] += id + 1234 * i;
+	}
+
 	idx[0] = (input_buffer[id+txCount*tot_nb_threads]) % nbAccounts;
 	#pragma unroll
 	for (i = 1; i < read_intensive_size; i++) {
@@ -229,9 +249,8 @@ __device__ void readOnly_tx(PR_txCallDefArgs, int txCount)
 
 #ifndef BANK_DISABLE_PRSTM
 	int nbRetries = 0;
-	const int maxNbRetries = 100;
 	PR_txBegin();
-	if (nbRetries++ > maxNbRetries) break;
+	if (nbRetries++ > PR_maxNbRetries) break;
 #endif /* BANK_DISABLE_PRSTM */
 
 	// reads the accounts first, then mutates the locations
@@ -267,6 +286,114 @@ __device__ void readOnly_tx(PR_txCallDefArgs, int txCount)
 #endif /* BANK_DISABLE_PRSTM */
 }
 
+__device__ void update_tx2(PR_txCallDefArgs, int txCount)
+{
+	int id = threadIdx.x+blockDim.x*blockIdx.x;
+	volatile int i = 0;
+	double count_amount = 0;
+	HeTM_bankTx_input_s *input = (HeTM_bankTx_input_s*)args.inBuf;
+	PR_GRANULE_T *accounts = (PR_GRANULE_T*)input->accounts;
+	int isInter = input->is_intersection;
+	size_t nbAccounts = input->nbAccounts;
+	int *input_buffer = input->input_buffer;
+	int *output_buffer = input->output_buffer;
+	int option = PR_rand(INT_MAX);
+	int tot_nb_threads = blockDim.x*gridDim.x;
+
+	unsigned randNum;
+	unsigned accountIdx;
+
+	HeTM_GPU_log_s *GPU_log = (HeTM_GPU_log_s*)args.pr_args_ext;
+	long *state = GPU_log->state;
+	volatile int seedState;
+
+	// TODO: new parameter for the spins
+	for (i = 0; i < devParsedData.GPU_backoff; i++) {
+		state[id] += id + 1234 * i;
+	}
+
+	volatile int nbRetries = 0;
+	PR_txBegin();
+	if (nbRetries++ > PR_maxNbRetries) break;
+
+	seedState = state[id];
+
+	// #pragma unroll
+	for (i = 0; i < read_intensive_size; i++) {
+		randNum = PR_rand(INT_MAX);
+		if (!isInter) {
+			accountIdx = GPU_ACCESS(randNum, nbAccounts);
+		} else {
+			accountIdx = randNum % nbAccounts;
+		}
+		// printf("randNum = %u\n", randNum);
+		count_amount += PR_read(accounts + accountIdx);
+	}
+
+	state[id] = seedState;
+
+	// #pragma unroll
+	for (i = 0; i < read_intensive_size; i++) {
+		randNum = PR_rand(INT_MAX); // 56; //
+		if (!isInter) {
+			accountIdx = GPU_ACCESS(randNum, nbAccounts);
+		} else {
+			accountIdx = randNum % nbAccounts;
+		}
+		// printf("randNum = %u\n", randNum);
+		// PR_read(accounts + accountIdx);
+		PR_write(accounts + accountIdx, count_amount * input_buffer[id+txCount*tot_nb_threads]);
+	}
+
+	PR_txCommit();
+
+	output_buffer[id] = *(accounts + accountIdx);
+}
+
+__device__ void readOnly_tx2(PR_txCallDefArgs, int txCount)
+{
+	int id = threadIdx.x+blockDim.x*blockIdx.x;
+	int i = 0; //how many transactions one thread need to commit
+	double count_amount = 0;
+	HeTM_bankTx_input_s *input = (HeTM_bankTx_input_s*)args.inBuf;
+	PR_GRANULE_T *accounts = (PR_GRANULE_T*)input->accounts;
+	int isInter = input->is_intersection;
+	size_t nbAccounts = input->nbAccounts;
+	int *output_buffer = input->output_buffer;
+	int option = PR_rand(INT_MAX);
+
+	unsigned randNum;
+	unsigned accountIdx;
+
+	HeTM_GPU_log_s *GPU_log = (HeTM_GPU_log_s*)args.pr_args_ext;
+	long *state = GPU_log->state;
+	volatile int seedState;
+
+	// TODO: new parameter for the spins
+	for (i = 0; i < devParsedData.GPU_backoff; i++) {
+		state[id] += id + 1234 * i;
+	}
+
+	int nbRetries = 0;
+	PR_txBegin();
+	if (nbRetries++ > PR_maxNbRetries) break;
+
+	#pragma unroll
+	for (i = 0; i < read_intensive_size; i++) {
+		randNum = PR_rand(INT_MAX);
+		if (!isInter) {
+			accountIdx = GPU_ACCESS(randNum, nbAccounts);
+		} else {
+			accountIdx = randNum % nbAccounts;
+		}
+		// printf("randNum = %u\n", randNum);
+		count_amount += PR_read(accounts + accountIdx);
+	}
+	PR_txCommit();
+
+	output_buffer[id] = *(accounts + accountIdx);
+}
+
 __device__ void update_tx(PR_txCallDefArgs, int txCount)
 {
 	const int max_size_of_reads = 20;
@@ -290,6 +417,15 @@ __device__ void update_tx(PR_txCallDefArgs, int txCount)
 	unsigned writeAccountIdx;
 	unsigned readAccountIdx;
 
+	HeTM_GPU_log_s *GPU_log = (HeTM_GPU_log_s*)args.pr_args_ext;
+	long *state = GPU_log->state;
+	volatile int seedState;
+
+	// TODO: new parameter for the spins
+	for (i = 0; i < devParsedData.GPU_backoff; i++) {
+		state[id] += id + 1234 * i;
+	}
+
 	// before the transaction pick the accounts (needs PR-STM stuff)
 	// random_Kernel(PR_txCallArgs, idx, nbAccounts, is_intersection); //get random index
 	__syncthreads();
@@ -304,9 +440,8 @@ __device__ void update_tx(PR_txCallDefArgs, int txCount)
 
 #ifndef BANK_DISABLE_PRSTM
 	int nbRetries = 0;
-	const int maxNbRetries = 500;
 	PR_txBegin();
-	if (nbRetries++ > maxNbRetries) break;
+	if (nbRetries++ > PR_maxNbRetries) break;
 #endif
 
 	// TODO: store must be controlled with parsedData.access_controller
@@ -391,6 +526,15 @@ __device__ void updateReadOnly_tx(PR_txCallDefArgs, int txCount)
 	int option = PR_rand(INT_MAX);
 	int tot_nb_threads = blockDim.x*gridDim.x;
 
+	HeTM_GPU_log_s *GPU_log = (HeTM_GPU_log_s*)args.pr_args_ext;
+	long *state = GPU_log->state;
+	volatile int seedState;
+
+	// TODO: new parameter for the spins
+	for (i = 0; i < devParsedData.GPU_backoff; i++) {
+		state[id] += id + 1234 * i;
+	}
+
 	// before the transaction pick the accounts (needs PR-STM stuff)
 	// random_Kernel(PR_txCallArgs, idx, nbAccounts, is_intersection); //get random index
 	// __syncthreads();
@@ -403,9 +547,8 @@ __device__ void updateReadOnly_tx(PR_txCallDefArgs, int txCount)
 
 #ifndef BANK_DISABLE_PRSTM
 	int nbRetries = 0;
-	const int maxNbRetries = 500;
 	PR_txBegin();
-	if (nbRetries++ > maxNbRetries) break;
+	if (nbRetries++ > PR_maxNbRetries) break;
 #endif
 
 	// reads the accounts first, then mutates the locations
@@ -440,6 +583,9 @@ __global__ void bankTx(PR_globalKernelArgs)
 {
 	int tid = PR_THREAD_IDX;
 
+	__shared__ int rndVoteOption[32];
+	__shared__ int rndVoteOption2[32];
+
 #if BANK_PART == 7 || BANK_PART == 8
 	return;
 #endif /* BANK_PART == 7 */
@@ -448,8 +594,16 @@ __global__ void bankTx(PR_globalKernelArgs)
 
 	int i = 0; //how many transactions one thread need to commit
 	// HeTM_bankTx_input_s *input = (HeTM_bankTx_input_s*)args.inBuf;
-	int option = PR_rand(INT_MAX);
-	int option2 = PR_rand(INT_MAX);
+	int option;
+	int option2;
+
+	if (threadIdx.x % 32 == 0) {
+		rndVoteOption[threadIdx.x / 32] = PR_rand(INT_MAX);
+		rndVoteOption2[threadIdx.x / 32] = PR_rand(INT_MAX);
+	}
+	__syncthreads();
+	option = rndVoteOption[threadIdx.x / 32];
+	option2 = rndVoteOption2[threadIdx.x / 32];
 	// HeTM_GPU_log_s *GPU_log = (HeTM_GPU_log_s*)args.pr_args_ext;
 
   // TODO: it was txsPerGPUThread * iterations
@@ -472,6 +626,12 @@ __global__ void bankTx(PR_globalKernelArgs)
 				update_tx(PR_txCallArgs, i);
 			} else {
 				readOnly_tx(PR_txCallArgs, i);
+			}
+#elif BANK_PART == 9
+			if (option2 % 100 < devParsedData.prec_write_txs) {
+				update_tx2(PR_txCallArgs, i);
+			} else {
+				readOnly_tx2(PR_txCallArgs, i);
 			}
 #else /* BANK_PART == 5 */
 			if (option2 % 100 < devParsedData.prec_write_txs) { // prec read-only

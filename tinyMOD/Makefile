@@ -40,8 +40,8 @@ include Makefile.common
 ########################################################################
 
 # DEFINES += -DDESIGN=WRITE_BACK_ETL
-# DEFINES += -DDESIGN=WRITE_BACK_CTL
-DEFINES += -DDESIGN=WRITE_THROUGH
+DEFINES += -DDESIGN=WRITE_BACK_CTL
+# DEFINES += -DDESIGN=WRITE_THROUGH
 # DEFINES += -DDESIGN=MODULAR
 
 ########################################################################
@@ -103,10 +103,10 @@ DEFINES += -DIRREVOCABLE_ENABLED
 # Statistics3 = Log
 ########################################################################
 
-DEFINES += -DTM_STATISTICS
-# DEFINES += -UTM_STATISTICS
-DEFINES += -DTM_STATISTICS2
-# DEFINES += -UTM_STATISTICS2
+# DEFINES += -DTM_STATISTICS
+DEFINES += -UTM_STATISTICS
+# DEFINES += -DTM_STATISTICS2
+DEFINES += -UTM_STATISTICS2
 
 ### changed to HETM_INSTRUMENT_CPU
 # DEFINES += -DHETM_INSTRUMENT_CPU
@@ -224,8 +224,8 @@ endif
 # TLS_GLIBC: use the space reserved for TM in the GLIBC
 ########################################################################
 
-DEFINES += -DTLS_COMPILER
-# DEFINES += -DTLS_POSIX
+# DEFINES += -DTLS_COMPILER
+DEFINES += -DTLS_POSIX
 # DEFINES += -DTLS_DARWIN
 # DEFINES += -DTLS_GLIBC
 

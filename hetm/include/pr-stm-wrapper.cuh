@@ -118,21 +118,26 @@
 	GPU_log->isGPUOnly = (HeTM_shared_data.isCPUEnabled == 0); \
 	/* ---------------------- */ \
 	memman_select("HeTM_mempool_bmap"); \
-	memman_cpy_to_gpu(NULL, NULL, *hetm_batchCount); \
+	memman_cpy_to_gpu(HeTM_memStream2, NULL, *hetm_batchCount); \
 	memman_bmap_s *bmap = (memman_bmap_s*)memman_get_cpu(NULL); \
 	GPU_log->bmap = (memman_bmap_s*)memman_get_gpu(NULL); \
-	CUDA_CHECK_ERROR(cudaMemset(bmap->dev, 0, bmap->div), ""); \
+	if ((HeTM_shared_data.batchCount & 0xff) == 1) { \
+		CUDA_CHECK_ERROR(cudaMemsetAsync(bmap->dev, 0, bmap->div, (cudaStream_t)HeTM_memStream2), ""); \
+	} \
 	/* ---------------------- */ \
 	memman_select("HeTM_mempool_backup_bmap"); \
-	memman_cpy_to_gpu(NULL, NULL, *hetm_batchCount); \
+	memman_cpy_to_gpu(HeTM_memStream2, NULL, *hetm_batchCount); \
 	memman_bmap_s *bmapBackup = (memman_bmap_s*)memman_get_cpu(NULL); \
 	GPU_log->bmapBackup = (memman_bmap_s*)memman_get_gpu(NULL); \
-	CUDA_CHECK_ERROR(cudaMemset(bmapBackup->dev, 0, bmapBackup->div), ""); \
+	if ((HeTM_shared_data.batchCount & 0xff) == 1) { \
+		CUDA_CHECK_ERROR(cudaMemsetAsync(bmapBackup->dev, 0, bmapBackup->div, (cudaStream_t)HeTM_memStream2), ""); \
+  } \
 	/* ---------------------- */ \
 	args->host.pr_args_ext = (void*)GPU_log; \
 	memman_select("HeTM_gpuLog"); \
 	args->dev.pr_args_ext = memman_get_gpu(NULL); \
-	memman_cpy_to_gpu(NULL, NULL, *hetm_batchCount); \
+	memman_cpy_to_gpu(HeTM_memStream2, NULL, *hetm_batchCount); \
+	cudaStreamSynchronize((cudaStream_t)HeTM_memStream2); \
 }) \
 
 #ifdef PR_AFTER_RUN_EXT

@@ -66,6 +66,8 @@ void bank_parseArgs(int argc, char **argv, thread_data_t *data)
   data->GPUInputFile      = XSTR(DEFAULT_GPU_FILE);
   data->CPUInputFile      = XSTR(DEFAULT_CPU_FILE);
 
+  data->timeBudget        = 0.01f;
+
   struct option long_options[] = {
     // These options don't set a flag
     {"help",                no_argument,       NULL, 'h'},
@@ -79,6 +81,7 @@ void bank_parseArgs(int argc, char **argv, thread_data_t *data)
     {"trfs",                required_argument, NULL, 't'},
     {"gpu-blocks",          required_argument, NULL, 'b'},
     {"gpu-threads",         required_argument, NULL, 'x'},
+    {"gpu-threads",         required_argument, NULL, 'X'},
     {"tperthread",          required_argument, NULL, 'T'},
     {"output-file",         required_argument, NULL, 'f'},
     {"input-gpu",           required_argument, NULL, 'G'},
@@ -92,7 +95,7 @@ void bank_parseArgs(int argc, char **argv, thread_data_t *data)
 
   while(1) {
     i = 0;
-    c = getopt_long(argc, argv, "ha:d:n:s:m:i:t:T:C:G:f:b:x:S:N:l:R:", long_options, &i);
+    c = getopt_long(argc, argv, "ha:d:n:s:m:i:t:T:C:G:f:b:x:S:N:l:R:X:", long_options, &i);
 
     if(c == -1)
       break;
@@ -148,6 +151,8 @@ void bank_parseArgs(int argc, char **argv, thread_data_t *data)
           "        Number of blocks for the GPU (default=" XSTR(DEFAULT_NB_GPU_BLKS) ")\n"
           "  -x, --gpu-threads <int>\n"
           "        Number of threads for the GPU (default=" XSTR(DEFAULT_NB_GPU_THRS) ")\n"
+          "  -X, --time-budget <int>\n"
+          "        Minimum duration for an amount of batches in seconds (default=0.01)\n"
         );
         exit(0);
       case 'a':
@@ -193,6 +198,9 @@ void bank_parseArgs(int argc, char **argv, thread_data_t *data)
       case 'x':
         data->GPUthreadNum = atoi(optarg);
         break;
+      case 'X':
+        data->timeBudget = atof(optarg);
+        break;
       case '?':
         printf("Use -h or --help for help\n");
         exit(0);
@@ -219,6 +227,11 @@ void bank_parseArgs(int argc, char **argv, thread_data_t *data)
   data->CPU_backoff = 100;
   if (input_exists("CPU_BACKOFF")) {
     data->CPU_backoff = input_getLong("CPU_BACKOFF");
+  }
+
+  data->GPU_backoff = 100;
+  if (input_exists("GPU_BACKOFF")) {
+    data->GPU_backoff = input_getLong("GPU_BACKOFF");
   }
 
   data->GPU_batch_duration = 100;

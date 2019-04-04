@@ -55,7 +55,7 @@ __global__ void HeTM_knl_checkTxBitmapCache(HeTM_knl_cmp_args_s args)
   int isConfl = (rset[id] == args.batchCount) && isNewWrite;
   int isConflW = (GPUwset[id] && isNewWrite) ? 1 : 0;
   unionWS[id] = (GPUwset[id] || isNewWrite) ? 1 : 0;
-  
+
   // the rset cache is also used as conflict detection
   rset[id] = isConfl ? args.batchCount : 0;
   rwsetConfl[id] = isConflW ? 1 : 0;
@@ -154,7 +154,13 @@ __device__ void applyHostWritesOnDev(
 );
 
 // ---------------------- COMPRESSED
-__device__ void checkTx_versionLOG(int sizeWSet, int sizeRSet, int idCPUThread);
+__device__ void checkTx_versionLOG(
+  int batchCount,
+  int sizeWSet,
+  int sizeRSet,
+  int idCPUThread,
+  int doApply
+);
 // ---------------------------------
 
 /****************************************
@@ -168,8 +174,20 @@ __global__ void HeTM_knl_checkTxCompressed(HeTM_knl_cmp_args_s args)
   int sizeWSet = args.sizeWSet; /* Size of the host log */
   int sizeRSet = args.sizeRSet; /* Size of the device log */
   int idCPUThr = args.idCPUThr; /* Size of the device log */
+  int batchCount = args.batchCount;
 
-  checkTx_versionLOG(sizeWSet, sizeRSet, idCPUThr);
+  checkTx_versionLOG(batchCount, sizeWSet, sizeRSet, idCPUThr, 1);
+}
+
+// checks for conflicts but does not apply
+__global__ void HeTM_knl_earlyCheckTxCompressed(HeTM_knl_cmp_args_s args)
+{
+  int sizeWSet = args.sizeWSet; /* Size of the host log */
+  int sizeRSet = args.sizeRSet; /* Size of the device log */
+  int idCPUThr = args.idCPUThr; /* Size of the device log */
+  int batchCount = args.batchCount; // TODO: is 0
+
+  checkTx_versionLOG(batchCount, sizeWSet, sizeRSet, idCPUThr, 0);
 }
 
 #if HETM_LOG_TYPE == HETM_ADDR_LOG
@@ -249,8 +267,13 @@ __global__ void HeTM_knl_checkTxExplicit(HeTM_knl_cmp_args_s args)
 // TODO: need comments
 #if HETM_LOG_TYPE == HETM_VERS2_LOG
 // entries_per_thread == LOG_SIZE*STM_LOG_BUFFER_SIZE
-__device__ void checkTx_versionLOG(int sizeWSet, int entries_per_thread, int idCPUThread)
-{
+__device__ void checkTx_versionLOG(
+  int batchCount,
+  int sizeWSet,
+  int entries_per_thread,
+  int idCPUThread,
+  int doApply
+) {
   int id;
   uintptr_t offset = 0;
   HeTM_CPULogEntry *fetch_stm = NULL;
@@ -401,8 +424,13 @@ __device__ void checkTx_versionLOG(int sizeWSet, int entries_per_thread, int idC
 }
 
 #else /* HETM_LOG_TYPE != HETM_VERS2_LOG */
-__device__ void checkTx_versionLOG(int sizeWSet, int sizeRSet, int idCPUThread)
-{
+__device__ void checkTx_versionLOG(
+  int batchCount,
+  int sizeWSet,
+  int sizeRSet,
+  int idCPUThread,
+  int doApply
+) {
   int id;
   uintptr_t index = 0;
   uintptr_t GPU_addr = 0;
@@ -433,62 +461,99 @@ __device__ void checkTx_versionLOG(int sizeWSet, int sizeRSet, int idCPUThread)
   GPU_addr = (uintptr_t)&(a[index]); // TODO: change the name "a" to accounts
   fetch_gpu = ByteM_GET_POS(index, logBM); //logBM[index];
 
-  if (fetch_gpu != 0) {
+  if (fetch_gpu == batchCount && *HeTM_knl_global.isInterConfl != 1) {
     // CPU and GPU conflict in some address
     // printf("found confl on index=%lu id=%i (last 4: %i %i %i %i)\n", index, id,
     //   stm_log[id-4].pos, stm_log[id-3].pos, stm_log[id-2].pos, stm_log[id-1].pos);
+    // printf("Abort on index = %i doApply = %i\n", index, doApply);
     *HeTM_knl_global.isInterConfl = 1;
   }
-  applyHostWritesOnDev(fetch_stm, GPU_addr, index);
+  if (doApply) { applyHostWritesOnDev(fetch_stm, GPU_addr, index); }
 }
 
 __device__ void applyHostWritesOnDev(
   HeTM_CPULogEntry *fetch_stm, uintptr_t GPU_addr, int index
 ) {
 #if HETM_LOG_TYPE == HETM_VERS_LOG
-  while (fetch_stm) {
-    /* */
-    //- TODO: refactor!
-    long *vers = (long*)HeTM_knl_global.versions;
-    PR_GRANULE_T *a = (PR_GRANULE_T*)HeTM_knl_global.devMemPoolBasePtr;
-    // PR_GRANULE_T *b = (PR_GRANULE_T*)HeTM_knl_global.devMemPoolBackupBasePtr;
-    int *mutex = HeTM_knl_global.PRLockTable;
-    int *mux     = (int*)&(PR_GET_MTX(mutex, GPU_addr));
-    int val      = *mux; // atomic read
-    int isLocked = PR_CHECK_LOCK(val) || PR_CHECK_PRELOCK(val);
+  // TODO: low resolution timer! Needs to deal with clock wraps
+  uint32_t ts = fetch_stm->time_stamp;
+  uint32_t ts_lock = (ts << 1) + 1;
+  uint32_t ts_unlock = (ts << 1);
+  uint32_t oldVers;
+  uint32_t *vers = (uint32_t*)HeTM_knl_global.versions;
+  PR_GRANULE_T *a = (PR_GRANULE_T*)HeTM_knl_global.devMemPoolBasePtr;
+  PR_GRANULE_T *b = (PR_GRANULE_T*)HeTM_knl_global.devMemPoolBackupBasePtr;
 
-    if (isLocked) continue;
+  oldVers = vers[index];
+  fetch_stm->pos = 0;
+  while (oldVers < ts_unlock) { // we have fresher results
+    if (atomicCAS(&(vers[index]), oldVers, ts_lock) == oldVers) {
+      // locked! apply the results and unlock
 
-    int pr_version = PR_GET_VERSION(val);
-    int pr_owner   = PR_GET_OWNER(val);
-    int lockVal    = PR_LOCK_VAL(pr_version, pr_owner);
-    // ---------
-    // - this is what is consuming more time executing (and causing divergency)
-    // ------------------------------------------------------------------------
-    if (atomicCAS(mux, val, lockVal) == val) { // LOCK
-      // if the comming write is more recent apply, if not ignore
-      if (fetch_stm->time_stamp > vers[index]) {
-        // TODO: I'm here need to apply on the backup as well (case drop GPU)
-        a[index] = fetch_stm->val;
-        // b[index] = fetch_stm->val;
-        vers[index] = fetch_stm->time_stamp; // set GPU version
+      a[index] = fetch_stm->val;
+      b[index] = fetch_stm->val;
+      vers[index] = fetch_stm->time_stamp; // set GPU version
 
-        // memman_bmap_s *key_bmap = (memman_bmap_s*)HeTM_knl_global.devMemPoolBackupBmap;
-        // char *bytes = key_bmap->dev;
-        char *bytes = (char*)HeTM_knl_global.devMemPoolBackupBmap;
+      char *bytes = (char*)HeTM_knl_global.devMemPoolBackupBmap;
 
-        // index has granularity sizeof(int) --> transform it
-        int chunkIdx = (index << 2) >> DEFAULT_BITMAP_GRANULARITY_BITS;
-        bytes[chunkIdx] = 1;
-      }
-      atomicCAS(mux, lockVal, 0); // UNLOCK
-      break;
-    } else if (fetch_stm->time_stamp <= vers[index]) {
+      // index has granularity sizeof(int) --> transform it
+      int chunkIdx = (index << 2) >> DEFAULT_BITMAP_GRANULARITY_BITS;
+      bytes[chunkIdx] = 1;
+
+      // unlock!
+      atomicCAS(&(vers[index]), ts_lock, ts_unlock);
       break;
     }
-    // ------------------------------------------------------------------------
-    // break;
+    oldVers = vers[index];
   }
+
+  // TODO: backup below
+  //
+  // while (fetch_stm) { // loops while can't grab the lock
+  //   /* */
+  //   //- TODO: DO NOT USE THE PR-STM LOCKS! --> we
+  //   // probably can get away with the version table
+  //   long *vers = (long*)HeTM_knl_global.versions;
+  //   PR_GRANULE_T *a = (PR_GRANULE_T*)HeTM_knl_global.devMemPoolBasePtr;
+  //   PR_GRANULE_T *b = (PR_GRANULE_T*)HeTM_knl_global.devMemPoolBackupBasePtr;
+  //   int *mutex = HeTM_knl_global.PRLockTable;
+  //   int *mux     = (int*)&(PR_GET_MTX(mutex, GPU_addr));
+  //   int val      = *mux; // atomic read
+  //   int isLocked = PR_CHECK_LOCK(val) || PR_CHECK_PRELOCK(val);
+  //
+  //   if (isLocked) continue;
+  //
+  //   int pr_version = PR_GET_VERSION(val);
+  //   int pr_owner   = PR_GET_OWNER(val);
+  //   int lockVal    = PR_LOCK_VAL(pr_version, pr_owner);
+  //   // ---------
+  //   // - this is what is consuming more time executing (and causing divergency)
+  //   // ------------------------------------------------------------------------
+  //   if (atomicCAS(mux, val, lockVal) == val) { // LOCK
+  //     // if the comming write is more recent apply, if not ignore
+  //     if (fetch_stm->time_stamp > vers[index]) {
+  //
+  //       // apply on main dataset and on snapshot --> CPU wins always
+  //       a[index] = fetch_stm->val;
+  //       b[index] = fetch_stm->val;
+  //       vers[index] = fetch_stm->time_stamp; // set GPU version
+  //
+  //       // memman_bmap_s *key_bmap = (memman_bmap_s*)HeTM_knl_global.devMemPoolBackupBmap;
+  //       // char *bytes = key_bmap->dev;
+  //       char *bytes = (char*)HeTM_knl_global.devMemPoolBackupBmap;
+  //
+  //       // index has granularity sizeof(int) --> transform it
+  //       int chunkIdx = (index << 2) >> DEFAULT_BITMAP_GRANULARITY_BITS;
+  //       bytes[chunkIdx] = 1;
+  //     }
+  //     atomicCAS(mux, lockVal, 0); // UNLOCK
+  //     break;
+  //   } else if (fetch_stm->time_stamp <= vers[index]) {
+  //     break;
+  //   }
+  //   // ------------------------------------------------------------------------
+  //   // break;
+  // }
 #elif HETM_LOG_TYPE == HETM_ADDR_LOG
   char *vers = (char*)HeTM_knl_global.versions;
   // TODO: doesn't work! there is some bug here!

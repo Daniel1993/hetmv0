@@ -42,6 +42,8 @@ __constant__ __device__ thread_data_t devParsedData;
 
 __device__ static unsigned memcached_global_clock = 0;
 
+__constant__ __device__ int PR_maxNbRetries = 16;
+
 /****************************************************************************
  *	KERNELS
  ****************************************************************************/
@@ -159,9 +161,8 @@ __device__ void readIntensive_tx(PR_txCallDefArgs, int txCount)
 
 #ifndef BANK_DISABLE_PRSTM
 	int nbRetries = 0;
-	const int maxNbRetries = 100;
 	PR_txBegin();
-	if (nbRetries++ > maxNbRetries) break;
+	if (nbRetries++ > PR_maxNbRetries) break;
 #endif /* BANK_DISABLE_PRSTM */
 
 	// reads the accounts first, then mutates the locations
@@ -231,9 +232,8 @@ __device__ void readOnly_tx(PR_txCallDefArgs, int txCount)
 
 #ifndef BANK_DISABLE_PRSTM
 	int nbRetries = 0;
-	const int maxNbRetries = 100;
 	PR_txBegin();
-	if (nbRetries++ > maxNbRetries) break;
+	if (nbRetries++ > PR_maxNbRetries) break;
 #endif /* BANK_DISABLE_PRSTM */
 
 	// reads the accounts first, then mutates the locations
@@ -303,9 +303,8 @@ __device__ void update_tx(PR_txCallDefArgs, int txCount)
 
 #ifndef BANK_DISABLE_PRSTM
 	int nbRetries = 0;
-	const int maxNbRetries = 500;
 	PR_txBegin();
-	if (nbRetries++ > maxNbRetries) break;
+	if (nbRetries++ > PR_maxNbRetries) break;
 #endif
 
 	// reads the accounts first, then mutates the locations
@@ -381,9 +380,8 @@ __device__ void updateReadOnly_tx(PR_txCallDefArgs, int txCount)
 
 #ifndef BANK_DISABLE_PRSTM
 	int nbRetries = 0;
-	const int maxNbRetries = 500;
 	PR_txBegin();
-	if (nbRetries++ > maxNbRetries) break;
+	if (nbRetries++ > PR_maxNbRetries) break;
 #endif
 
 	// reads the accounts first, then mutates the locations
@@ -404,54 +402,6 @@ __device__ void updateReadOnly_tx(PR_txCallDefArgs, int txCount)
 #endif
 
 	output_buffer[id] = reads[0] + reads[1];
-}
-
-/*********************************
- *	bankTx()
- *
- *  Main PR-STM transaction kernel
- **********************************/
-/*
-* Isto e' o que interessa
-*/
-__global__ void bankTx(PR_globalKernelArgs)
-{
-	int tid = PR_THREAD_IDX;
-
-	PR_enterKernel(tid);
-
-	int i = 0; //how many transactions one thread need to commit
-	// HeTM_bankTx_input_s *input = (HeTM_bankTx_input_s*)args.inBuf;
-	int option = PR_rand(INT_MAX);
-	int option2 = PR_rand(INT_MAX);
-	// HeTM_GPU_log_s *GPU_log = (HeTM_GPU_log_s*)args.pr_args_ext;
-
-  // TODO: it was txsPerGPUThread * iterations
-	for (i = 0; i < txsPerGPUThread; ++i) { // each thread need to commit x transactions
-
-		// __syncthreads();
-		if (option % 100 < prec_read_intensive) {
-			// TODO:
-			if (option2 % 100 < devParsedData.prec_write_txs) { // prec read-only
-				readIntensive_tx(PR_txCallArgs, i);
-			} else {
-				readOnly_tx(PR_txCallArgs, i);
-			}
-		} else {
-			if (option2 % 100 < devParsedData.prec_write_txs) { // prec read-only
-				update_tx(PR_txCallArgs, i);
-			} else {
-				readOnly_tx(PR_txCallArgs, i);
-				// updateReadOnly_tx(PR_txCallArgs, i);
-			}
-		}
-	}
-
-	// __syncthreads();
-	// volatile long lclock = clock64();
-	// while(clock64() - lclock < 1000000);
-
-	PR_exitKernel();
 }
 
 // TODO: MemcachedGPU part
@@ -493,7 +443,7 @@ void memcdReadTx(PR_globalKernelArgs)
 
 	HeTM_memcdTx_input_s *input = (HeTM_memcdTx_input_s*)args.inBuf;
 	PR_GRANULE_T       *keys = (PR_GRANULE_T*)input->key;
-	PR_GRANULE_T  *extraKeys = (PR_GRANULE_T*)input->extraKey;
+	// PR_GRANULE_T  *extraKeys = (PR_GRANULE_T*)input->extraKey;
 	PR_GRANULE_T     *values = (PR_GRANULE_T*)input->val;
 	PR_GRANULE_T  *extraVals = (PR_GRANULE_T*)input->extraVal;
 	PR_GRANULE_T     *ts_CPU = (PR_GRANULE_T*)input->ts_CPU;
@@ -503,7 +453,7 @@ void memcdReadTx(PR_globalKernelArgs)
 
 	// TODO: out is NULL
 	memcd_get_output_t  *out = (memcd_get_output_t*)input->output;
-	int           curr_clock = *((int*)input->curr_clock);
+	// int           curr_clock = *((int*)input->curr_clock);
 	int          *input_keys = (int*)input->input_keys;
 	int               nbSets = input->nbSets;
 	int               nbWays = input->nbWays;
@@ -513,8 +463,16 @@ void memcdReadTx(PR_globalKernelArgs)
 	// foundKey[threadIdx.x] = 0;
 	// __syncthreads();
 
+	HeTM_GPU_log_s *GPU_log = (HeTM_GPU_log_s*)args.pr_args_ext;
+	volatile long *GPU_log_state = GPU_log->state;
+
+	// TODO: new parameter for the spins
+	for (volatile int i = 0; i < devParsedData.GPU_backoff; i++) {
+		GPU_log_state[id] += id + 1234 * i;
+	}
+
 	for (int i = 0; i < devParsedData.trans; ++i) { // num_ways keys
-		// out[threadIdx.x+blockDim.x*blockIdx.x*devParsedData.trans + i].isFound = 0;
+		out[threadIdx.x+blockDim.x*blockIdx.x*devParsedData.trans + i].isFound = 0;
 	}
 
 	for (int i = 0; i < (nbWays + devParsedData.trans); ++i) { // num_ways keys
@@ -534,7 +492,8 @@ void memcdReadTx(PR_globalKernelArgs)
 // 		int mod_key = input_key % nbSets;
 // 		int target_set = (mod_key / 2 + (mod_key % 2) * (nbSets / 2)) % nbSets;
 // #endif
-		int mod_key = (input_key>>4) % nbSets;
+		int mod_key = input_key % nbSets;
+		// int mod_key = (input_key>>4) % nbSets;
 		int target_set = mod_key; // / 3 + (mod_key % 3) * (nbSets / 3);
 
 		int thread_pos = target_set*nbWays + wayId;
@@ -677,6 +636,14 @@ __global__ void memcdWriteTx(PR_globalKernelArgs)
 	__shared__ int failed_to_insert[256]; // TODO
 	if (wayId == 0) failed_to_insert[warpSliceID] = 0;
 
+	HeTM_GPU_log_s *GPU_log = (HeTM_GPU_log_s*)args.pr_args_ext;
+	volatile long *GPU_log_state = GPU_log->state;
+
+	// TODO: new parameter for the spins
+	for (volatile int i = 0; i < devParsedData.GPU_backoff; i++) {
+		GPU_log_state[id] += id + 1234 * i;
+	}
+
 	HeTM_memcdTx_input_s *input = (HeTM_memcdTx_input_s*)args.inBuf;
 	memcd_get_output_t  *out = (memcd_get_output_t*)input->output;
 	PR_GRANULE_T       *keys = (PR_GRANULE_T*)input->key;
@@ -733,8 +700,10 @@ __global__ void memcdWriteTx(PR_globalKernelArgs)
 // 		int mod_key = input_key % nbSets;
 // 		int target_set = (mod_key / 2 + (mod_key % 2) * (nbSets / 2)) % nbSets;
 // #endif
-		int mod_key = (input_key>>4) % nbSets;
-		int target_set = (mod_key / 2 + (mod_key % 2) * (nbSets / 2)) % nbSets;
+		int mod_key = input_key % nbSets;
+		// int mod_key = (input_key>>4) % nbSets;
+		// int target_set = (mod_key / 2 + (mod_key % 2) * (nbSets / 2)) % nbSets;
+		int target_set = mod_key;
 
 		int thread_pos = target_set*nbWays + wayId;
 
@@ -786,7 +755,7 @@ __global__ void memcdWriteTx(PR_globalKernelArgs)
 		if (thread_is_found) {
 			int nbRetries = 0; //TODO: on fail should repeat the search
 			PR_txBegin(); // TODO: I think this may not work
-			if (nbRetries > 0) {
+			if (nbRetries > PR_maxNbRetries) {
 				// TODO: is ignoring the input
 				// someone got it; need to find a new spot for the key
 				failed_to_insert[warpSliceID] = 1;
@@ -839,7 +808,7 @@ __global__ void memcdWriteTx(PR_globalKernelArgs)
 			// the low id thread must be the one that writes
 			int nbRetries = 0;  //TODO: on fail should repeat the search
 			PR_txBegin(); // TODO: I think this may not work
-			if (nbRetries > 0) {
+			if (nbRetries > PR_maxNbRetries) {
 				// someone got it; need to find a new spot for the key
 				failed_to_insert[warpSliceID] = 1;
 				break;
@@ -884,7 +853,7 @@ __global__ void memcdWriteTx(PR_globalKernelArgs)
 		if (!warp_is_found && !warp_is_empty && min_ts == thread_ts) {
 			int nbRetries = 0; //TODO: on fail should repeat the search
 			PR_txBegin(); // TODO: I think this may not work
-			if (nbRetries > 0) {
+			if (nbRetries > PR_maxNbRetries) {
 		 		// someone got it; need to find a new spot for the key
 				failed_to_insert[warpSliceID] = 1;
 				break;

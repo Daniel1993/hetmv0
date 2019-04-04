@@ -23,27 +23,33 @@ HIGH_CPU_THREADS=20
 rm -f Bank.csv
 
 DURATION=10000
-DATASET=250000000
-PROB_WRITE=10 # test also with 50 and 10
-CPU_BACKOFF=200
+DATASET=150000000 #250000000
+PROB_WRITE=100 # test also with 50 and 10
+# CPU_BACKOFF=250
+CPU_BACKOFF=1
+
+# TRANSACTION_SIZE=16 # default
+TRANSACTION_SIZE=2
 
 function doRunLargeDTST_1 {
 	# Seq. access, 18 items, prob. write {5..95}, writes 1%
 	for s in `seq 1 $SAMPLES`
 	do
 		# 100M 500M 1G 1.5G
-		timeout 60s ./bank -n 14 -b 320 -x 128 -a $DATASET -d $DURATION -R 0 -S 16 -l $PROB_WRITE -N 1 -T 1  CPU_BACKOFF=$CPU_BACKOFF
-		timeout 60s ./bank -n 14 -b 320 -x 256 -a $DATASET -d $DURATION -R 0 -S 16 -l $PROB_WRITE -N 1 -T 1  CPU_BACKOFF=$CPU_BACKOFF
-		timeout 60s ./bank -n 14 -b 640 -x 256 -a $DATASET -d $DURATION -R 0 -S 16 -l $PROB_WRITE -N 1 -T 1  CPU_BACKOFF=$CPU_BACKOFF
-		timeout 60s ./bank -n 14 -b 640 -x 256 -a $DATASET -d $DURATION -R 0 -S 16 -l $PROB_WRITE -N 1 -T 2  CPU_BACKOFF=$CPU_BACKOFF
-		timeout 60s ./bank -n 14 -b 640 -x 256 -a $DATASET -d $DURATION -R 0 -S 16 -l $PROB_WRITE -N 1 -T 4  CPU_BACKOFF=$CPU_BACKOFF
-		timeout 60s ./bank -n 14 -b 640 -x 256 -a $DATASET -d $DURATION -R 0 -S 16 -l $PROB_WRITE -N 1 -T 8  CPU_BACKOFF=$CPU_BACKOFF
-		timeout 60s ./bank -n 14 -b 640 -x 256 -a $DATASET -d $DURATION -R 0 -S 16 -l $PROB_WRITE -N 1 -T 16 CPU_BACKOFF=$CPU_BACKOFF
-		timeout 60s ./bank -n 14 -b 640 -x 256 -a $DATASET -d $DURATION -R 0 -S 16 -l $PROB_WRITE -N 1 -T 32 CPU_BACKOFF=$CPU_BACKOFF
-		# timeout 60s ./bank -n 14 -b 1 -x 1 -a $DATASET -d $DURATION -R 0 -S 2 -l 100 -N 1 -T 32 CPU_BACKOFF=50 BATCH_DURATION=250
-		# timeout 60s ./bank -n 14 -b 1 -x 1 -a $DATASET -d $DURATION -R 0 -S 2 -l 100 -N 1 -T 32 CPU_BACKOFF=50 BATCH_DURATION=300
-		# timeout 60s ./bank -n 14 -b 1 -x 1 -a $DATASET -d $DURATION -R 0 -S 2 -l 100 -N 1 -T 32 CPU_BACKOFF=50 BATCH_DURATION=400
-		# timeout 60s ./bank -n 14 -b 1 -x 1 -a $DATASET -d $DURATION -R 0 -S 2 -l 100 -N 1 -T 32 CPU_BACKOFF=50 BATCH_DURATION=500
+
+		timeout 60s ./bank -n 14 -b 640 -x 256 -a $DATASET -d $DURATION -R 0 -S $TRANSACTION_SIZE -l $PROB_WRITE -N 1 -T 1  CPU_BACKOFF=$CPU_BACKOFF
+		# timeout 60s ./bank -n 14 -b 640 -x 256 -a $DATASET -d $DURATION -R 0 -S $TRANSACTION_SIZE -l $PROB_WRITE -N 1 -T 2  CPU_BACKOFF=$CPU_BACKOFF
+		timeout 60s ./bank -n 14 -b 640 -x 256 -a $DATASET -d $DURATION -R 0 -S $TRANSACTION_SIZE -l $PROB_WRITE -N 1 -T 4  CPU_BACKOFF=$CPU_BACKOFF
+		# timeout 60s ./bank -n 14 -b 640 -x 256 -a $DATASET -d $DURATION -R 0 -S $TRANSACTION_SIZE -l $PROB_WRITE -N 1 -T 8  CPU_BACKOFF=$CPU_BACKOFF
+		timeout 60s ./bank -n 14 -b 640 -x 384 -a $DATASET -d $DURATION -R 0 -S $TRANSACTION_SIZE -l $PROB_WRITE -N 1 -T 8  CPU_BACKOFF=$CPU_BACKOFF
+		timeout 60s ./bank -n 14 -b 640 -x 256 -a $DATASET -d $DURATION -R 0 -S $TRANSACTION_SIZE -l $PROB_WRITE -N 1 -T 16 CPU_BACKOFF=$CPU_BACKOFF
+		timeout 60s ./bank -n 14 -b 640 -x 384 -a $DATASET -d $DURATION -R 0 -S $TRANSACTION_SIZE -l $PROB_WRITE -N 1 -T 16 CPU_BACKOFF=$CPU_BACKOFF
+		timeout 60s ./bank -n 14 -b 640 -x 256 -a $DATASET -d $DURATION -R 0 -S $TRANSACTION_SIZE -l $PROB_WRITE -N 1 -T 32 CPU_BACKOFF=$CPU_BACKOFF
+		timeout 60s ./bank -n 14 -b 768 -x 256 -a $DATASET -d $DURATION -R 0 -S $TRANSACTION_SIZE -l $PROB_WRITE -N 1 -T 32 CPU_BACKOFF=$CPU_BACKOFF
+		timeout 60s ./bank -n 14 -b 640 -x 384 -a $DATASET -d $DURATION -R 0 -S $TRANSACTION_SIZE -l $PROB_WRITE -N 1 -T 32 CPU_BACKOFF=$CPU_BACKOFF
+		timeout 60s ./bank -n 14 -b 768 -x 384 -a $DATASET -d $DURATION -R 0 -S $TRANSACTION_SIZE -l $PROB_WRITE -N 1 -T 32 CPU_BACKOFF=$CPU_BACKOFF
+		### TODO: larger batches
+		###
 		mv Bank.csv ${1}${s}
 	done
 }
@@ -53,29 +59,30 @@ function doRunLargeDTST_100 {
 	for s in `seq 1 $SAMPLES`
 	do
 		# 100M 500M 1G 1.5G
-		timeout 60s ./bank -n 14 -b 320 -x 128 -a $DATASET -d $DURATION -R 0 -S 16 -l $PROB_WRITE -N 100 -T 1  CPU_BACKOFF=$CPU_BACKOFF
-		timeout 60s ./bank -n 14 -b 320 -x 256 -a $DATASET -d $DURATION -R 0 -S 16 -l $PROB_WRITE -N 100 -T 1  CPU_BACKOFF=$CPU_BACKOFF
-		timeout 60s ./bank -n 14 -b 640 -x 256 -a $DATASET -d $DURATION -R 0 -S 16 -l $PROB_WRITE -N 100 -T 1  CPU_BACKOFF=$CPU_BACKOFF
-		timeout 60s ./bank -n 14 -b 640 -x 256 -a $DATASET -d $DURATION -R 0 -S 16 -l $PROB_WRITE -N 100 -T 2  CPU_BACKOFF=$CPU_BACKOFF
-		timeout 60s ./bank -n 14 -b 640 -x 256 -a $DATASET -d $DURATION -R 0 -S 16 -l $PROB_WRITE -N 100 -T 4  CPU_BACKOFF=$CPU_BACKOFF
-		timeout 60s ./bank -n 14 -b 640 -x 256 -a $DATASET -d $DURATION -R 0 -S 16 -l $PROB_WRITE -N 100 -T 8  CPU_BACKOFF=$CPU_BACKOFF
-		timeout 60s ./bank -n 14 -b 640 -x 256 -a $DATASET -d $DURATION -R 0 -S 16 -l $PROB_WRITE -N 100 -T 16 CPU_BACKOFF=$CPU_BACKOFF
-		timeout 60s ./bank -n 14 -b 640 -x 256 -a $DATASET -d $DURATION -R 0 -S 16 -l $PROB_WRITE -N 100 -T 32 CPU_BACKOFF=$CPU_BACKOFF
-		# timeout 60s ./bank -n 14 -b 1 -x 1 -a $DATASET -d $DURATION -R 0 -S 2 -l 100 -N 100 -T 32 CPU_BACKOFF=50 BATCH_DURATION=250
-		# timeout 60s ./bank -n 14 -b 1 -x 1 -a $DATASET -d $DURATION -R 0 -S 2 -l 100 -N 100 -T 32 CPU_BACKOFF=50 BATCH_DURATION=300
-		# timeout 60s ./bank -n 14 -b 1 -x 1 -a $DATASET -d $DURATION -R 0 -S 2 -l 100 -N 100 -T 32 CPU_BACKOFF=50 BATCH_DURATION=400
-		# timeout 60s ./bank -n 14 -b 1 -x 1 -a $DATASET -d $DURATION -R 0 -S 2 -l 100 -N 100 -T 32 CPU_BACKOFF=50 BATCH_DURATION=500
+		timeout 60s ./bank -n 14 -b 640 -x 256 -a $DATASET -d $DURATION -R 0 -S $TRANSACTION_SIZE -l $PROB_WRITE -N 10 -T 1  CPU_BACKOFF=$CPU_BACKOFF
+		# timeout 60s ./bank -n 14 -b 640 -x 256 -a $DATASET -d $DURATION -R 0 -S $TRANSACTION_SIZE -l $PROB_WRITE -N 10 -T 2  CPU_BACKOFF=$CPU_BACKOFF
+		timeout 60s ./bank -n 14 -b 640 -x 256 -a $DATASET -d $DURATION -R 0 -S $TRANSACTION_SIZE -l $PROB_WRITE -N 10 -T 4  CPU_BACKOFF=$CPU_BACKOFF
+		# timeout 60s ./bank -n 14 -b 640 -x 256 -a $DATASET -d $DURATION -R 0 -S $TRANSACTION_SIZE -l $PROB_WRITE -N 10 -T 8  CPU_BACKOFF=$CPU_BACKOFF
+		timeout 60s ./bank -n 14 -b 640 -x 384 -a $DATASET -d $DURATION -R 0 -S $TRANSACTION_SIZE -l $PROB_WRITE -N 10 -T 8  CPU_BACKOFF=$CPU_BACKOFF
+		timeout 60s ./bank -n 14 -b 640 -x 256 -a $DATASET -d $DURATION -R 0 -S $TRANSACTION_SIZE -l $PROB_WRITE -N 10 -T 16 CPU_BACKOFF=$CPU_BACKOFF
+		timeout 60s ./bank -n 14 -b 640 -x 384 -a $DATASET -d $DURATION -R 0 -S $TRANSACTION_SIZE -l $PROB_WRITE -N 10 -T 16 CPU_BACKOFF=$CPU_BACKOFF
+		timeout 60s ./bank -n 14 -b 640 -x 256 -a $DATASET -d $DURATION -R 0 -S $TRANSACTION_SIZE -l $PROB_WRITE -N 10 -T 32 CPU_BACKOFF=$CPU_BACKOFF
+		timeout 60s ./bank -n 14 -b 768 -x 256 -a $DATASET -d $DURATION -R 0 -S $TRANSACTION_SIZE -l $PROB_WRITE -N 10 -T 32 CPU_BACKOFF=$CPU_BACKOFF
+		timeout 60s ./bank -n 14 -b 640 -x 384 -a $DATASET -d $DURATION -R 0 -S $TRANSACTION_SIZE -l $PROB_WRITE -N 10 -T 32 CPU_BACKOFF=$CPU_BACKOFF
+		timeout 60s ./bank -n 14 -b 768 -x 384 -a $DATASET -d $DURATION -R 0 -S $TRANSACTION_SIZE -l $PROB_WRITE -N 10 -T 32 CPU_BACKOFF=$CPU_BACKOFF
+		### TODO: larger batches
+		###
 		mv Bank.csv ${1}${s}
 	done
 }
 
-function doRunLargeDTST_GPU_1 {
+function doRunLargeDTST_CPU_1 {
 	# Seq. access, 18 items, prob. write {5..95}, writes 1%
 	for s in `seq 1 $SAMPLES`
 	do
 		# 100M 500M 1G 1.5G
-		timeout 60s ./bank -n 14 -b 1 -x 1 -a $DATASET -d $DURATION -R 0 -S 2 -l $PROB_WRITE \
-			-N 1 -T 32 CPU_BACKOFF=$CPU_BACKOFF BATCH_DURATION=150
+		timeout 60s ./bank -n 14 -b 1 -x 1 -a $DATASET -d $DURATION -R 0 -S 16 -l $PROB_WRITE \
+			-N 1 -T 32 CPU_BACKOFF=$CPU_BACKOFF
 		tail -n 1 Bank.csv > /tmp/BankLastLine.csv
 		for i in `seq 1 7`
 		do
@@ -85,13 +92,13 @@ function doRunLargeDTST_GPU_1 {
 	done
 }
 
-function doRunLargeDTST_GPU_100 {
+function doRunLargeDTST_CPU_100 {
 	# Seq. access, 18 items, prob. write {5..95}, writes 1%
 	for s in `seq 1 $SAMPLES`
 	do
 		# 100M 500M 1G 1.5G
-		timeout 60s ./bank -n 14 -b 1 -x 1 -a $DATASET -d $DURATION -R 0 -S 2 -l $PROB_WRITE \
-			-N 100 -T 32 CPU_BACKOFF=$CPU_BACKOFF BATCH_DURATION=150
+		timeout 60s ./bank -n 14 -b 1 -x 1 -a $DATASET -d $DURATION -R 0 -S 16 -l $PROB_WRITE \
+			-N 100 -T 32 CPU_BACKOFF=$CPU_BACKOFF
 		tail -n 1 Bank.csv > /tmp/BankLastLine.csv
 		for i in `seq 1 7`
 		do
@@ -107,42 +114,55 @@ CPU_THREADS=14
 ###########################################################################
 
 ############### GPU-only
-make clean ; make CMP_TYPE=COMPRESSED USE_TSX_IMPL=1 CPUEn=0 PR_MAX_RWSET_SIZE=20 \
-	BANK_PART=1 GPU_PART=0.55 CPU_PART=0.55 P_INTERSECT=0.00 PROFILE=1 -j 14 \
-	DEFAULT_BITMAP_GRANULARITY_BITS=12 >/dev/null
-doRunLargeDTST_1 GPUonly_rand_sep_DISABLED_1_s
-doRunLargeDTST_100 GPUonly_rand_sep_DISABLED_100_s
+# make clean ; make CMP_TYPE=COMPRESSED USE_TSX_IMPL=1 CPUEn=0 PR_MAX_RWSET_SIZE=20 \
+# 	BANK_PART=1 GPU_PART=0.55 CPU_PART=0.55 P_INTERSECT=0.00 PROFILE=1 -j 14 \
+# 	DEFAULT_BITMAP_GRANULARITY_BITS=13 >/dev/null
+# doRunLargeDTST_1 GPUonly_rand_sep_DISABLED_1_s
+# doRunLargeDTST_100 GPUonly_rand_sep_DISABLED_100_s
+#
+# make clean ; make CMP_TYPE=COMPRESSED USE_TSX_IMPL=1 CPUEn=0 PR_MAX_RWSET_SIZE=20 \
+# 	BANK_PART=1 GPU_PART=0.55 CPU_PART=0.55 P_INTERSECT=0.00 PROFILE=1 -j 14 \
+# 	DEFAULT_BITMAP_GRANULARITY_BITS=13 OVERLAP_CPY_BACK=1 >/dev/null
+# doRunLargeDTST_1 GPUonly_rand_sep_DISABLED_OVERLAP_1_s
+# doRunLargeDTST_100 GPUonly_rand_sep_DISABLED_OVERLAP_100_s
 
 ############## CPU-only
 make clean ; make INST_CPU=0 GPUEn=0 USE_TSX_IMPL=1 PR_MAX_RWSET_SIZE=20 \
 	BANK_PART=1 GPU_PART=0.55 CPU_PART=0.55 P_INTERSECT=0.00 PROFILE=1 -j 14 \
-	DEFAULT_BITMAP_GRANULARITY_BITS=12 >/dev/null
-doRunLargeDTST_GPU_1 CPUonly_rand_sep_DISABLED_1_s
-doRunLargeDTST_GPU_100 CPUonly_rand_sep_DISABLED_100_s
+	DEFAULT_BITMAP_GRANULARITY_BITS=13 >/dev/null
+doRunLargeDTST_CPU_1 CPUonly_rand_sep_DISABLED_1_s
+doRunLargeDTST_CPU_100 CPUonly_rand_sep_DISABLED_100_s
 
-# LOG_SIZE=32768 STM_LOG_BUFFER_SIZE=16
+# LOG_SIZE=32768 STM_LOG_BUFFER_SIZE=128
 
 ############## VERS
 make clean ; make CMP_TYPE=COMPRESSED LOG_TYPE=VERS USE_TSX_IMPL=1 PR_MAX_RWSET_SIZE=20 \
 	BANK_PART=1 GPU_PART=0.55 CPU_PART=0.55 P_INTERSECT=0.00 PROFILE=1 -j 14 \
-	DEFAULT_BITMAP_GRANULARITY_BITS=12 DISABLE_NON_BLOCKING=1 \
-	LOG_SIZE=32768 STM_LOG_BUFFER_SIZE=16 >/dev/null
+	DEFAULT_BITMAP_GRANULARITY_BITS=13 DISABLE_NON_BLOCKING=1 \
+	LOG_SIZE=32768 STM_LOG_BUFFER_SIZE=128 >/dev/null
 doRunLargeDTST_1 VERS_BLOC_rand_sep_1_s
 doRunLargeDTST_100 VERS_BLOC_rand_sep_100_s
 
 make clean ; make CMP_TYPE=COMPRESSED LOG_TYPE=VERS USE_TSX_IMPL=1 PR_MAX_RWSET_SIZE=20 \
 	BANK_PART=1 GPU_PART=0.55 CPU_PART=0.55 P_INTERSECT=0.00 PROFILE=1 -j 14 \
-	DEFAULT_BITMAP_GRANULARITY_BITS=12 DISABLE_NON_BLOCKING=0 \
-	LOG_SIZE=32768 STM_LOG_BUFFER_SIZE=16 >/dev/null
+	DEFAULT_BITMAP_GRANULARITY_BITS=13 DISABLE_NON_BLOCKING=0 \
+	LOG_SIZE=32768 STM_LOG_BUFFER_SIZE=128 >/dev/null
 doRunLargeDTST_1 VERS_NON_BLOC_rand_sep_1_s
 doRunLargeDTST_100 VERS_NON_BLOC_rand_sep_100_s
 
-############## BMAP
-make clean ; make CMP_TYPE=COMPRESSED LOG_TYPE=BMAP USE_TSX_IMPL=1 PR_MAX_RWSET_SIZE=20 \
+make clean ; make CMP_TYPE=COMPRESSED LOG_TYPE=VERS USE_TSX_IMPL=1 PR_MAX_RWSET_SIZE=20 \
 	BANK_PART=1 GPU_PART=0.55 CPU_PART=0.55 P_INTERSECT=0.00 PROFILE=1 -j 14 \
-	DEFAULT_BITMAP_GRANULARITY_BITS=12 >/dev/null
-doRunLargeDTST_1 BMAP_rand_sep_1_s
-doRunLargeDTST_100 BMAP_rand_sep_100_s
+	DEFAULT_BITMAP_GRANULARITY_BITS=13 DISABLE_NON_BLOCKING=0 OVERLAP_CPY_BACK=1 \
+	LOG_SIZE=32768 STM_LOG_BUFFER_SIZE=128 >/dev/null
+doRunLargeDTST_1 VERS_NON_BLOC_OVER_rand_sep_1_s
+doRunLargeDTST_100 VERS_NON_BLOC_OVER_rand_sep_100_s
+
+############## BMAP
+# make clean ; make CMP_TYPE=COMPRESSED LOG_TYPE=BMAP USE_TSX_IMPL=1 PR_MAX_RWSET_SIZE=20 \
+# 	BANK_PART=1 GPU_PART=0.55 CPU_PART=0.55 P_INTERSECT=0.00 PROFILE=1 -j 14 \
+# 	DEFAULT_BITMAP_GRANULARITY_BITS=13 >/dev/null
+# doRunLargeDTST_1 BMAP_rand_sep_1_s
+# doRunLargeDTST_100 BMAP_rand_sep_100_s
 ###########################################################################
 
 

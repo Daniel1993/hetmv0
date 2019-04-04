@@ -70,6 +70,9 @@ typedef struct HeTM_thread_
   double timeCmpSum;
 
   cudaEvent_t cpyWSetStartEvent, cpyWSetStopEvent;
+  cudaEvent_t cpyLogChunkStartEvent[STM_LOG_BUFFER_SIZE];
+  cudaEvent_t cpyLogChunkStopEvent[STM_LOG_BUFFER_SIZE];
+  unsigned long logChunkEventCounter, logChunkEventStore;
   float timeCpy;
   double timeCpySum;
   double timeMemCpySum;
@@ -103,7 +106,6 @@ typedef struct HeTM_thread_
   int doHardLogCpy;
   int isCopying;
   HETM_LOG_T truncated;
-  int isNotFirstCpy;
 } HeTM_thread_s;
 
 // sigleton
@@ -121,7 +123,13 @@ typedef struct HeTM_shared_
   int isInterconflict; // set to 1 when a CPU-GPU conflict is found
 
   // memory pool
-  void *hostMemPool, *devMemPool, *devVersions;
+  void *hostMemPool;
+  void *devMemPool;
+  void *devMemPoolBmap;
+  void *hostBackupMemPool;
+  void *devBackupMemPool;
+  void *devBackupMemPoolBmap;
+  void *devVersions;
   void *devMemPoolShadow;
   void *devChunks;
   void *devMemPoolBackup; // only for HETM_ADDR_LOG and HETM_BMAP_LOG
@@ -154,6 +162,7 @@ typedef struct HeTM_shared_
   long threadsWaitingSync;
 
   long batchCount;
+  float timeBudget;
 
 } HeTM_shared_s;
 
@@ -177,6 +186,7 @@ typedef struct HeTM_statistics_ {
 typedef struct HeTM_init_ {
   HETM_INVALIDATE_POLICY policy;
   int nbCPUThreads, nbGPUBlocks, nbGPUThreads;
+  float timeBudget;
   int isCPUEnabled, isGPUEnabled;
 } HeTM_init_s;
 
@@ -190,6 +200,7 @@ extern HeTM_statistics_s HeTM_stats_data;
 extern hetm_pc_s *HeTM_offload_pc;
 extern __thread HeTM_thread_s *HeTM_thread_data;
 extern void *HeTM_memStream;
+extern void *HeTM_memStream2;
 
 #ifdef HETM_OLD_BMAP_IMPL
 // Use a cache with 1 value written/not-written
@@ -214,8 +225,10 @@ int HeTM_destroy();
 // allocate memory from this pool using HeTM_alloc(...)
 int HeTM_mempool_init(size_t pool_size);
 int HeTM_mempool_destroy();
-int HeTM_mempool_cpy_to_cpu(size_t *copiedSize);
-int HeTM_mempool_cpy_to_gpu(size_t *copiedSize);
+int HeTM_mempool_cpy_to_cpu(size_t *copiedSize, long batchCount);
+int HeTM_mempool_cpy_to_gpu(size_t *copiedSize, long batchCount);
+int HeTM_mempool_cpy_to_gpu_backup(size_t *copiedSize, long batchCount);
+int HeTM_mempool_cpy_to_gpu_main(size_t *copiedSize, long batchCount);
 int HeTM_alloc(void **cpu_ptr, void **gpu_ptr, size_t);
 int HeTM_free(void **cpu_ptr);
 void* HeTM_map_addr_to_gpu(void *origin);
@@ -258,6 +271,9 @@ int HeTM_before_batch(HeTM_callback);
 // neither CPU nor GPU are running (executes before HeTM_after_batch)
 int HeTM_after_batch(HeTM_callback);
 
+int HeTM_before_kernel(HeTM_callback); // use it, e.g., to send input
+int HeTM_after_kernel(HeTM_callback); // TODO: batch is not complete
+
 // Registers a callback to be later executed (serially in a side thread)
 void HeTM_async_request(HeTM_async_req_s req);
 void HeTM_free_async_request(HeTM_async_req_s *req); // Do not call this
@@ -270,7 +286,7 @@ int HeTM_join_CPU_threads();
 //----------------------
 
 //---------------------- getters/setters
-int HeTM_get_inter_confl_flag(void *stream);
+int HeTM_get_inter_confl_flag(void *stream, int doSync);
 int HeTM_reset_inter_confl_flag();
 #define HeTM_set_is_stop(isStop)       (HeTM_shared_data.stopFlag = isStop)
 #define HeTM_is_stop()                 (HeTM_shared_data.stopFlag)
@@ -282,7 +298,7 @@ int HeTM_reset_inter_confl_flag();
 #define HeTM_get_GPU_status()          (HeTM_shared_data.statusGPU)
 
 // resets PR-STM lock table, flags, etc
-int HeTM_reset_GPU_state();
+int HeTM_reset_GPU_state(long batchCount);
 //----------------------
 
 #ifdef __cplusplus
@@ -296,9 +312,11 @@ int HeTM_reset_GPU_state();
 #define HETM_PRINT(...) printf("[%s]: ", __func__); printf(__VA_ARGS__); printf("\n");
 
 // TODO: use flags to enable/disable each module prints
-#define HETM_DEB_THREADING(...) printf("[THR]"); HETM_PRINT(__VA_ARGS__)
+// #define HETM_DEB_THREADING(...) printf("[THR]"); HETM_PRINT(__VA_ARGS__)
+#define HETM_DEB_THREADING(...) /* empty */
 #define HETM_DEB_THRD_CPU(...)  printf("[CPU]"); HETM_PRINT(__VA_ARGS__)
-#define HETM_DEB_THRD_GPU(...)  printf("[GPU]"); HETM_PRINT(__VA_ARGS__)
+// #define HETM_DEB_THRD_GPU(...)  printf("[GPU]"); HETM_PRINT(__VA_ARGS__)
+#define HETM_DEB_THRD_GPU(...)  /* empty */
 
 #else /* !HETM_DEB */
 #define HETM_PRINT(...) /* empty */

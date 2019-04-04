@@ -24,7 +24,7 @@ DEFINES  :=
 #
 LIBS     := \
 	-L $(INPUT_HANDLER) -linput_handler \
-	-L $(CUDA_PATH)/lib64 -lcudart -lcuda -lcuda-util \
+	-L $(CUDA_PATH)/lib64 -lcudart -lcuda -lcuda-util -lnuma \
 	-L $(TINY_ROOT)/lib -lstm -lpthread \
 #
 LIB  := libhetm.a

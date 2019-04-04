@@ -1,6 +1,8 @@
 #ifndef TSX_IMPL_GUARD_H_
 #define TSX_IMPL_GUARD_H_
 
+#define HTM_SGL_INIT_BUDGET 10
+
 #include "htm_retry_template.h"
 #include "hetm-log.h"
 #include "rdtsc.h"
@@ -16,6 +18,7 @@ extern __thread uintptr_t HeTM_bufVal[HETM_BUFFER_MAXSIZE];
 extern __thread uintptr_t HeTM_bufVers[HETM_BUFFER_MAXSIZE];
 extern __thread uintptr_t HeTM_version;
 extern __thread size_t HeTM_ptr;
+extern __thread uint64_t HeTM_htmRndSeed;
 extern int errors[MAX_THREADS][HTM_NB_ERRORS];
 
 // updates the statistics
@@ -76,12 +79,17 @@ extern int errors[MAX_THREADS][HTM_NB_ERRORS];
   errors[tid][HTM_FALLBACK]++;
 
 // not defined in the template
-#define HTM_SGL_init_thr() ({ HTM_thr_init(); HeTM_log = stm_log_init(); })
+#define HTM_SGL_init_thr() ({ HTM_thr_init(); HeTM_log = stm_log_init(); HeTM_htmRndSeed *= HTM_SGL_tid + 1234; })
 #define HTM_SGL_exit_thr() ({ HTM_thr_exit(); if (HeTM_log != NULL) { stm_log_free(HeTM_log); HeTM_log = NULL; } })
 
 #define HeTM_get_log(ptr) ({ *(HeTM_CPULogNode_t **)ptr = stm_log_read(HeTM_log); })
 
 #undef HTM_SGL_before_read
 #define HTM_SGL_before_read(addr) /* empty */
+
+#undef AFTER_ABORT
+#define AFTER_ABORT(tid, budget, status) ({ \
+  if (RAND_R_FNC(HeTM_htmRndSeed) % 10000 < 10) { pthread_yield(); budget = 0; } \
+})
 
 #endif /* TSX_IMPL_GUARD_H_ */

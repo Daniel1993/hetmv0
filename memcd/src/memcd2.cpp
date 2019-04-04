@@ -154,7 +154,8 @@ memcd_get_output_t cpu_GET_kernel(memcd_t *memcd, int *input_key, unsigned input
 	int sizeCache = memcd->nbSets*memcd->nbWays;
 
 	// 1) hash key
-	modHash = (key>>4) % memcd->nbSets;
+	// modHash = (key>>4) % memcd->nbSets;
+	modHash = key % memcd->nbSets;
 	// TODO: this would be nice, but we lose control of where the key goes to
 	// memset(key, 0, size_of_hash);
 	// memcpy(key, input_key, sizeof(int));
@@ -241,7 +242,8 @@ void cpu_SET_kernel(memcd_t *memcd, int *input_key, int *input_value, unsigned i
 	int sizeCache = memcd->nbSets*memcd->nbWays;
 
 	// 1) hash key
-	modHash = (key>>4) % memcd->nbSets;
+	// modHash = (key>>4) % memcd->nbSets;
+	modHash = key % memcd->nbSets;
 	// TODO: this would be nice, but we lose control of where the key goes to
 	// memset(key, 0, size_of_hash);
 	// memcpy(key, input_key, sizeof(int));
@@ -385,7 +387,8 @@ void cpu_SET_kernel_NOTX(memcd_t *memcd, int *input_key, int *input_value, unsig
 	int sizeCache = memcd->nbSets*memcd->nbWays;
 
 	// 1) hash key
-	modHash = (key>>4) % memcd->nbSets;
+	// modHash = (key>>4) % memcd->nbSets;
+	modHash = key % memcd->nbSets;
 
 // #if BANK_PART == 1 /* use MOD 3 */
 // 	setIdx = modHash / 3 + (modHash % 3) * (memcd->nbSets / 3);
@@ -606,33 +609,37 @@ static void after_batch(int id, void *data)
 	// TODO: conflict mechanism
 }
 
+static void before_kernel(int id, void *data) { }
+
+static void after_kernel(int id, void *data) { }
+
 static int wasWaitingTXs = 0;
 
 static void choose_policy(int, void*) {
   // -----------------------------------------------------------------------
-  int idGPUThread = HeTM_shared_data.nbCPUThreads;
-  long TXsOnCPU = 0;
-	long TXsOnGPU = 0;
-  for (int i = 0; i < HeTM_shared_data.nbCPUThreads; ++i) {
-    TXsOnCPU += HeTM_shared_data.threadsInfo[i].curNbTxs;
-	}
-
-	if (!wasWaitingTXs) {
-		TXsOnGPU = parsedData.GPUthreadNum*parsedData.GPUblockNum*parsedData.trans;
-	}
+  // int idGPUThread = HeTM_shared_data.nbCPUThreads;
+  // long TXsOnCPU = 0;
+	// long TXsOnGPU = 0;
+  // for (int i = 0; i < HeTM_shared_data.nbCPUThreads; ++i) {
+  //   TXsOnCPU += HeTM_shared_data.threadsInfo[i].curNbTxs;
+	// }
+	//
+	// if (!wasWaitingTXs) {
+	// 	TXsOnGPU = parsedData.GPUthreadNum*parsedData.GPUblockNum*parsedData.trans;
+	// }
 
   // TODO: this picks the one with higher number of TXs
 	// TODO: GPU only gets the stats in the end --> need to remove the dropped TXs
-	HeTM_stats_data.nbTxsGPU += TXsOnGPU;
-  if (HeTM_shared_data.policy == HETM_GPU_INV) {
-		if (HeTM_is_interconflict()) {
-			HeTM_stats_data.nbDroppedTxsGPU += TXsOnGPU;
-		} else {
-			HeTM_stats_data.nbCommittedTxsGPU += TXsOnGPU;
-		}
-	} else if (HeTM_shared_data.policy == HETM_CPU_INV) {
-		HeTM_stats_data.nbCommittedTxsGPU += TXsOnGPU;
-	}
+	// HeTM_stats_data.nbTxsGPU += TXsOnGPU;
+  // if (HeTM_shared_data.policy == HETM_GPU_INV) {
+	// 	if (HeTM_is_interconflict()) {
+	// 		HeTM_stats_data.nbDroppedTxsGPU += TXsOnGPU;
+	// 	} else {
+	// 		HeTM_stats_data.nbCommittedTxsGPU += TXsOnGPU;
+	// 	}
+	// } else if (HeTM_shared_data.policy == HETM_CPU_INV) {
+	// 	HeTM_stats_data.nbCommittedTxsGPU += TXsOnGPU;
+	// }
 
 	// can only choose the policy for the next round
   // if (TXsOnCPU > TXsOnGPU) {
@@ -640,8 +647,8 @@ static void choose_policy(int, void*) {
   // } else {
   //   HeTM_shared_data.policy = HETM_CPU_INV;
   // }
-	wasWaitingTXs = 0;
-	__sync_synchronize();
+	// wasWaitingTXs = 0;
+	// __sync_synchronize();
   // -----------------------------------------------------------------------
 }
 
@@ -667,13 +674,15 @@ static void test_cuda(int id, void *data)
 			newStartInputPtr = oldStartInputPtr + NB_GPU_TXS;
 		} while (!__sync_bool_compare_and_swap(&startInputPtr[GPU_QUEUE], oldStartInputPtr, newStartInputPtr));
 		gotTXs = 1;
-		counter++;
-		if (counter & 1) {
-			memman_select("GPU_input_buffer_good1"); // GPU input buffer
-		} else {
-			memman_select("GPU_input_buffer_good2"); // GPU input buffer
-		}
-		memman_cpy_to_gpu(NULL, NULL, *hetm_batchCount);
+		counter = (counter + 1) % NB_OF_GPU_BUFFERS;
+
+		memman_select("GPU_input_buffer_good"); // GPU input buffer
+		int *cpuInput = (int*)memman_get_cpu(NULL);
+		int *gpuInput = (int*)memman_get_gpu(NULL);
+		cpuInput += counter * maxGPUoutputBufferSize;
+
+		CUDA_CPY_TO_DEV_ASYNC(gpuInput, cpuInput, maxGPUoutputBufferSize * sizeof(int), PR_getCurrentStream());
+		// memman_cpy_to_gpu(NULL, NULL, *hetm_batchCount);
 	}
 
 	if (isGPUBatchSteal /*&& startInputPtr[SHARED_QUEUE] + NB_GPU_TXS <= endInputPtr[SHARED_QUEUE]*/) {
@@ -686,13 +695,16 @@ static void test_cuda(int id, void *data)
 			newStartInputPtr = oldStartInputPtr + NB_GPU_TXS;
 		} while (!__sync_bool_compare_and_swap(&startInputPtr[SHARED_QUEUE], oldStartInputPtr, newStartInputPtr));
 		gotTXs = 1;
-		counter++;
-		if (counter & 1) {
-			memman_select("GPU_input_buffer_bad1"); // shared input buffer (sorry for the naming)
-		} else {
-			memman_select("GPU_input_buffer_bad2"); // shared input buffer (sorry for the naming
-		}
-		memman_cpy_to_gpu(NULL, NULL, *hetm_batchCount);
+		counter = (counter + 1) % NB_OF_GPU_BUFFERS;
+
+		memman_select("GPU_input_buffer_bad"); // GPU input buffer
+		int *cpuInput = (int*)memman_get_cpu(NULL);
+		int *gpuInput = (int*)memman_get_gpu(NULL);
+		cpuInput += counter * maxGPUoutputBufferSize;
+
+		// TODO: after a bad batch all abort (only happens on the GPU steal)
+		CUDA_CPY_TO_DEV_ASYNC(gpuInput, cpuInput, maxGPUoutputBufferSize * sizeof(int), PR_getCurrentStream());
+		// memman_cpy_to_gpu(NULL, NULL, *hetm_batchCount);
 	}
 
 	// if (!gotTXs) {
@@ -726,7 +738,7 @@ static void test_cuda(int id, void *data)
 	} else {
 
 		memman_select("memcd_global_ts");
-		memman_cpy_to_gpu(NULL, NULL, *hetm_batchCount);
+		memman_cpy_to_gpu(PR_getCurrentStream(), NULL, 1);
 
 		jobWithCuda_runMemcd(d, cd, base_ptr, *(d->memcd->globalTs));
 	}
@@ -807,10 +819,8 @@ int main(int argc, char **argv)
 	// copy the input before launching the kernel
 	memman_alloc_gpu("GPU_input_buffer", maxGPUoutputBufferSize*sizeof(int), NULL, 0);
 	GPUInputBuffer = (int*)memman_get_gpu(NULL);
-	memman_alloc_cpu("GPU_input_buffer_good1", maxGPUoutputBufferSize*sizeof(int), GPUInputBuffer, 0);
-	memman_alloc_cpu("GPU_input_buffer_good2", maxGPUoutputBufferSize*sizeof(int), GPUInputBuffer, 0);
-	memman_alloc_cpu("GPU_input_buffer_bad1", maxGPUoutputBufferSize*sizeof(int), GPUInputBuffer, 0);
-	memman_alloc_cpu("GPU_input_buffer_bad2", maxGPUoutputBufferSize*sizeof(int), GPUInputBuffer, 0);
+	memman_alloc_cpu("GPU_input_buffer_good", size_of_GPU_input_buffer, GPUInputBuffer, 0);
+	memman_alloc_cpu("GPU_input_buffer_bad", size_of_GPU_input_buffer, GPUInputBuffer, 0);
 
 	// CPU Buffers
 	malloc_or_die(CPUInputBuffer, size_of_CPU_input_buffer * 2); // good and bad
@@ -832,6 +842,7 @@ int main(int argc, char **argv)
     .nbCPUThreads = parsedData.nb_threads,
     .nbGPUBlocks  = parsedData.GPUblockNum,
     .nbGPUThreads = parsedData.GPUthreadNum,
+		.timeBudget   = parsedData.timeBudget,
 #if HETM_CPU_EN == 0
     .isCPUEnabled = 0,
     .isGPUEnabled = 1
@@ -926,28 +937,15 @@ int main(int argc, char **argv)
   printf("Initializing STM\n");
 
 	/* POPULATE the cache */
-	memman_select("GPU_input_buffer_good1");
+	memman_select("GPU_input_buffer_good");
 	int *gpu_buffer_cpu_ptr = (int*)memman_get_cpu(NULL);
-	for (int i = 0; i < size_of_GPU_input_buffer/4/sizeof(int); ++i) {
+	for (int i = 0; i < size_of_GPU_input_buffer/sizeof(int); ++i) {
 		cpu_SET_kernel_NOTX(memcd, &gpu_buffer_cpu_ptr[i], &gpu_buffer_cpu_ptr[i], 0);
 	}
-	memman_select("GPU_input_buffer_bad1");
+	memman_select("GPU_input_buffer_bad");
 	gpu_buffer_cpu_ptr = (int*)memman_get_cpu(NULL);
-	for (int i = 0; i < size_of_GPU_input_buffer/4/sizeof(int); ++i) {
+	for (int i = 0; i < size_of_GPU_input_buffer/sizeof(int); ++i) {
 		cpu_SET_kernel_NOTX(memcd, &gpu_buffer_cpu_ptr[i], &gpu_buffer_cpu_ptr[i], 0);
-	}
-	memman_select("GPU_input_buffer_good2");
-	gpu_buffer_cpu_ptr = (int*)memman_get_cpu(NULL);
-	for (int i = 0; i < size_of_GPU_input_buffer/4/sizeof(int); ++i) {
-		cpu_SET_kernel_NOTX(memcd, &gpu_buffer_cpu_ptr[i], &gpu_buffer_cpu_ptr[i], 0);
-	}
-	memman_select("GPU_input_buffer_bad2");
-	gpu_buffer_cpu_ptr = (int*)memman_get_cpu(NULL);
-	for (int i = 0; i < size_of_GPU_input_buffer/4/sizeof(int); ++i) {
-		cpu_SET_kernel_NOTX(memcd, &gpu_buffer_cpu_ptr[i], &gpu_buffer_cpu_ptr[i], 0);
-	}
-	for (int i = 0; i < (size_of_CPU_input_buffer * 2)/sizeof(int); ++i) {
-		cpu_SET_kernel_NOTX(memcd, &CPUInputBuffer[i], &CPUInputBuffer[i], 0);
 	}
 
 	// for (int i = 0; i < 32*4; ++i) {
@@ -994,6 +992,8 @@ int main(int argc, char **argv)
     HeTM_start(test, test_cuda, data);
 		HeTM_after_batch(after_batch);
 		HeTM_before_batch(before_batch);
+		HeTM_after_kernel(after_kernel);
+		HeTM_before_kernel(before_kernel);
 
 		HeTM_choose_policy(choose_policy);
 

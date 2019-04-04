@@ -29,7 +29,7 @@ INCLUDES := -I $(CUDA_UTIL_DIR)/include \
 #
 DEFINES  :=
 #
-LIBS     := -L $(CUDA_PATH)/lib64 -lcudart -lcuda \
+LIBS     := -L $(CUDA_PATH)/lib64 -lcudart -lcuda -lnuma \
 	-L $(INPUT_HANDLER) -linput_handler \
 	-L $(TINY_ROOT)/lib -lstm -lpthread \
 	-L $(HETM_ROOT) -lhetm \
@@ -77,15 +77,17 @@ CFLAGS   += $(DEBUG_FLAGS)
 CXXFLAGS += $(DEBUG_FLAGS)
 NVFLAGS  += $(NV_DEB_FLAGS)
 endif
+
 ifneq ($(CFG),debug)
-CFLAGS   += -DNDEBUG
-CXXFLAGS += -DNDEBUG
-NVFLAGS  += -DNDEBUG
+CFLAGS   += -O3 -DNDEBUG
+CXXFLAGS += -O3 -DNDEBUG
+NVFLAGS  += -O3 -DNDEBUG
 endif
 
 SRC        := $(CURR_DIR)/src
 BANK_OBJS  := \
 	$(SRC)/bank.o \
+	$(SRC)/bankTXs.o \
 	$(SRC)/bankKernel.o \
 	$(SRC)/cmp_kernels.o \
 	$(SHARED)/src/shared.o \
@@ -115,9 +117,9 @@ all: $(APP)
 
 simple: $(OBJS)
 	# does not recompile everything
-	$(CXX) $(CXXFLAGS) -O3 -o $(SRC)/bank.o $(SRC)/bank.cpp
+	# $(CXX) $(CXXFLAGS) -Os -o $(SRC)/bank.o $(SRC)/bank.cpp
+	$(CXX) $(CXXFLAGS) -O0 -o $(SRC)/bankTXs.o $(SRC)/bankTXs.cpp
 	#$(CXX) $(CXXFLAGS) -O1 -o $(SRC)/memcd2.o $(SRC)/memcd2.cpp
-	sleep 1s
 	$(NVCC) $(LDFLAGS) -o $(APP) $(OBJS)
 
 # TODO: propagate PR_MAX_RWSET_SIZE and HETM_CMP_TYPE
@@ -135,7 +137,6 @@ $(APP): $(OBJS)
 		PROFILE=$(PROFILE) \
 		INST_CPU=$(INST_CPU) \
 		USE_UNIF_MEM=$(USE_UNIF_MEM) \
-		HETM_DISABLE_CHUNKS=$(DHETM_DISABLE_CHUNKS) \
 		PRINT_DEB=$(PRINT_DEB)
 	@echo " ============================================ "
 	@echo " === Building TinyMOD lib "
@@ -147,7 +148,6 @@ $(APP): $(OBJS)
 		LOG_TYPE=$(LOG_TYPE) \
 		PR_MAX_RWSET_SIZE=$(PR_MAX_RWSET_SIZE) \
 		CFG=$(CFG) \
-		HETM_DISABLE_CHUNKS=$(DHETM_DISABLE_CHUNKS) \
 		INST_CPU=$(INST_CPU) \
 		PRINT_DEB=$(PRINT_DEB)
 	@echo " ============================================ "
@@ -161,7 +161,6 @@ $(APP): $(OBJS)
 		PR_MAX_RWSET_SIZE=$(PR_MAX_RWSET_SIZE) \
 		CFG=$(CFG) \
 		INST_CPU=$(INST_CPU) \
-		HETM_DISABLE_CHUNKS=$(DHETM_DISABLE_CHUNKS) \
 		PRINT_DEB=$(PRINT_DEB)
 	@echo " ============================================ "
 	@echo " === Building HeTM lib (again) "
@@ -176,13 +175,12 @@ $(APP): $(OBJS)
 		PROFILE=$(PROFILE) \
 		INST_CPU=$(INST_CPU) \
 		USE_UNIF_MEM=$(USE_UNIF_MEM) \
-		HETM_DISABLE_CHUNKS=$(DHETM_DISABLE_CHUNKS) \
 		PRINT_DEB=$(PRINT_DEB) \
 		LOG_SIZE=$(LOG_SIZE) \
 		STM_LOG_BUFFER_SIZE=$(STM_LOG_BUFFER_SIZE)
 	@echo "Linking..."
 	### TODO: optimization breaks performance
-	$(CXX) $(CXXFLAGS) -O3 -o $(SRC)/bank.o $(SRC)/bank.cpp
+	$(CXX) $(CXXFLAGS) -O0 -o $(SRC)/bankTXs.o $(SRC)/bankTXs.cpp
 	$(NVCC) $(LDFLAGS) -o $@ $(OBJS)
 
 %.o:	%.c

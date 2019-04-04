@@ -49,10 +49,6 @@ DEFINES += -DHETM_LOG_TYPE=4
 endif
 ############
 
-ifeq ($(DISABLE_CHUNKS),1)
-DEFINES += -DHETM_DISABLE_CHUNKS=1
-endif
-
 CFLAGS     := -c $(DEFINES) $(INCLUDES)
 CXXFLAGS   := -c $(DEFINES) $(INCLUDES) -std=c++11
 LDFLAGS    := $(LIBS)

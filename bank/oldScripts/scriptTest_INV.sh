@@ -68,14 +68,14 @@ for s in `seq $SAMPLES`
 do
 	##################################
 	# GPU-only
-	make clean ; make CMP_TYPE=DISABLED GPU_PART=1 CPU_PART=0 DISABLE_CHUNKS=1 \
+	make clean ; make CMP_TYPE=DISABLED GPU_PART=1 CPU_PART=0 \
 		P_INTERSECT=0.0 CPUEn=0 USE_TSX_IMPL=0 BANK_PART=1 PROFILE=1 BENCH=BANK -j 14
 	doExperiment GPU_NO_HACKS BLOCKS DATASET GPU_THREADS
 	##################################
 
 	##################################
 	# TSX-only
-	make clean ; make CMP_TYPE=DISABLED GPU_PART=0.0 CPU_PART=1.0 DISABLE_CHUNKS=0 \
+	make clean ; make CMP_TYPE=DISABLED GPU_PART=0.0 CPU_PART=1.0 \
 		P_INTERSECT=0.0 GPUEn=0 USE_TSX_IMPL=1 INST_CPU=0 BANK_PART=1 PROFILE=1 BENCH=BANK -j 14
 	doExperiment TSX_only THR_BLOCKS DATASET THREADS
 	##################################

@@ -60,7 +60,7 @@ void LaunchTestKernel(void *argsPtr)
   outBuf.buf = NULL;
   outBuf.size = 0;
   PR_prepareIO(&HeTM_pr_args, inBuf, outBuf);
-  PR_run(test_kernel, &HeTM_pr_args, NULL);
+  PR_run(test_kernel, &HeTM_pr_args);
 
   cudaError_t cudaStatus;
   if ((cudaStatus = cudaGetLastError()) != cudaSuccess) {

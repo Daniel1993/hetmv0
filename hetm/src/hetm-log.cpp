@@ -59,10 +59,6 @@ stm_log_newentry(HETM_LOG_T *log, long* pos, int val, long vers)
 #if HETM_LOG_TYPE == HETM_BMAP_LOG
   /* ********************************************** */
 // TODO: this thing is useless now!!! check what this actually affects
-// #if !defined(HETM_DISABLE_CHUNKS)
-//   // TODO: debug change 1 --> *hetm_batchCount (I think this is not being used at all)
-//   memman_access_addr(stm_devMemPoolBackupBmap, pos, *hetm_batchCount); // *hetm_batchCount
-// #endif /* HETM_DISABLE_CHUNKS */
   // set bitmap
   // TODO: 2 ==> PR_LOCK_GRAN_BITS
   memman_access_addr_gran(stm_wsetCPU, stm_baseMemPool, pos, 1, 2, *hetm_batchCount);

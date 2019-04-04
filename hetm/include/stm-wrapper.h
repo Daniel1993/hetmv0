@@ -39,13 +39,13 @@
 #define TM_STORE(addr, value) ({ \
   uintptr_t _mask64Bits = (-1) << 3; \
   uintptr_t _newAddr = (uintptr_t)(addr) & _mask64Bits; \
-  uintptr_t _toStore, _high, _low; \
+  uintptr_t _toStore, _high, _low, _value = (uintptr_t)value; \
   if ((uintptr_t)(addr) & 0x4) { \
-    _high = value & (0xFFFFFFFFL); \
+    _high = _value & (0xFFFFFFFFL); \
     _low = *((stm_word_t*)(_newAddr)) & (0xFFFFFFFFL); /* 32 bits */ \
   } else { \
     _high = (*((stm_word_t*)(_newAddr)) & (0xFFFFFFFFL << 32)) >> 32; \
-    _low = value & (0xFFFFFFFFL); \
+    _low = _value & (0xFFFFFFFFL); \
   } \
   _toStore = (_high << 32) | _low; \
   stm_store((stm_word_t *)(_newAddr), (stm_word_t)_toStore); \

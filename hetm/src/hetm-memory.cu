@@ -11,6 +11,8 @@
 #include "pr-stm-wrapper.cuh"
 #include "hetm-cmp-kernels.cuh"
 
+#include "rdtsc.h"
+
 #include <map>
 
 using namespace std;
@@ -133,20 +135,52 @@ void HeTM_destroyCurandState()
   memman_free_gpu();
 }
 
-int HeTM_mempool_cpy_to_cpu(size_t *copiedSize)
+int HeTM_mempool_cpy_to_cpu(size_t *copiedSize, long batchCount)
 {
 #ifndef USE_UNIF_MEM
-  memman_select("HeTM_mempool");
-  memman_cpy_to_cpu(HeTM_memStream, copiedSize, *hetm_batchCount);
-  return 0; // TODO: error code
+  // memman_select("HeTM_mempool");
+  // I'm assuming the gpu did the D->D copy
+  memman_select("HeTM_mempool_backup");
+  // if (HeTM_shared_data.isCPUEnabled == 0) {
+  //   // there is some bug with the counter
+    memman_cpy_to_cpu(HeTM_memStream, copiedSize, batchCount);
+  // } else {
+  //   memman_cpy_to_cpu(HeTM_memStream, copiedSize, batchCount);
+  // }
+
 #endif /* USE_UNIF_MEM */
+  return 0; // TODO: error code
 }
 
-int HeTM_mempool_cpy_to_gpu(size_t *copiedSize)
+int HeTM_mempool_cpy_to_gpu_backup(size_t *copiedSize, long batchCount)
+{
+#ifndef USE_UNIF_MEM
+  // bitmaps copied elsewhere (memman_cpy_to_cpu_buffer_bitmap)
+  memman_select("HeTM_mempool_backup");
+  void *devPtr = memman_get_gpu(NULL);
+  memman_select("HeTM_mempool");
+  memman_cpy_to_gpu_backup(devPtr, HeTM_memStream, copiedSize, batchCount);
+#endif /* USE_UNIF_MEM */
+  return 0; // TODO: error code
+}
+
+int HeTM_mempool_cpy_to_gpu_main(size_t *copiedSize, long batchCount)
+{
+#ifndef USE_UNIF_MEM
+  // bitmaps copied elsewhere (memman_cpy_to_cpu_buffer_bitmap)
+  memman_select("HeTM_mempool"); // I've just inverted these lines
+  void *devPtr = memman_get_gpu(NULL);
+  memman_select("HeTM_mempool_backup");
+  memman_cpy_to_gpu_backup(devPtr, HeTM_memStream, copiedSize, batchCount);
+#endif /* USE_UNIF_MEM */
+  return 0; // TODO: error code
+}
+
+int HeTM_mempool_cpy_to_gpu(size_t *copiedSize, long batchCount)
 {
 #ifndef USE_UNIF_MEM
   memman_select("HeTM_mempool");
-  memman_cpy_to_gpu(HeTM_memStream, copiedSize, *hetm_batchCount);
+  memman_cpy_to_gpu(HeTM_memStream, copiedSize, batchCount);
 #endif /* USE_UNIF_MEM */
   return 0; // TODO: error code
 }
@@ -210,6 +244,8 @@ void HeTM_wset_log_cpy_to_gpu(
   cudaStream_t stream = (cudaStream_t)threadData->stream;
   int count = 0;
 
+  // printf("!%i! before set curCopyNb=%i\n", threadData->id, threadData->curCopyNb);
+
   sizeBuffer = STM_LOG_BUFFER_SIZE * LOG_SIZE;
 
   res = HeTM_shared_data.wsetLog;
@@ -220,32 +256,52 @@ void HeTM_wset_log_cpy_to_gpu(
   // Thread may have copied previous chunks
   resAux += threadData->curCopyNb * LOG_SIZE;
 
-  if (threadData->isNotFirstCpy) {
-    float timeTaken;
-    CUDA_EVENT_SYNCHRONIZE(threadData->cpyWSetStartEvent);
-    CUDA_EVENT_SYNCHRONIZE(threadData->cpyWSetStopEvent);
-    CUDA_EVENT_ELAPSED_TIME(&timeTaken, threadData->cpyWSetStartEvent,
-      threadData->cpyWSetStopEvent);
-    threadData->timeLogs = timeTaken;
-    threadData->timeCpy = threadData->timeLogs;
+  // TODO: the events slow down the experiment !!! ---- do not always take them
+  if (threadData->logChunkEventCounter > 0 && HeTM_shared_data.batchCount == 1) {
+    int nbCopies = threadData->logChunkEventCounter - threadData->logChunkEventStore;
+    int counter = threadData->logChunkEventCounter;
+    for (int i = 0; i < nbCopies; ++i) {
+      int eventIdx = (i+threadData->logChunkEventStore) % STM_LOG_BUFFER_SIZE;
+      float timeTaken;
+      CUDA_EVENT_SYNCHRONIZE(threadData->cpyLogChunkStartEvent[eventIdx]);
+      CUDA_EVENT_SYNCHRONIZE(threadData->cpyLogChunkStopEvent[eventIdx]);
+      CUDA_EVENT_ELAPSED_TIME(&timeTaken, threadData->cpyLogChunkStartEvent[eventIdx],
+        threadData->cpyLogChunkStopEvent[eventIdx]);
+      // threadData->timeLogs is an average
+      threadData->timeLogs += (1.0f / (counter + 1.0f)) * (timeTaken - threadData->timeLogs);
+      threadData->timeCpy = timeTaken;
+      threadData->timeCpySum += threadData->timeCpy;
+      counter++;
+    }
+    threadData->logChunkEventStore = threadData->logChunkEventCounter;
+  } else if (threadData->logChunkEventCounter > 0) {
+    threadData->timeCpy = threadData->timeLogs; // uses the averaged value
     threadData->timeCpySum += threadData->timeCpy;
   }
-  threadData->isNotFirstCpy = 1;
-  threadData->isCopying = 0; // next one can come in
 
   logAux = node;
-  CUDA_EVENT_RECORD(threadData->cpyWSetStartEvent, stream);
-  // CUDA_EVENT_RECORD(threadData->cpyWSetStartEvent, stream); // USE TIMER_T
+
+  // unsigned long t0 = rdtsc(), t2, t3, t4;
+  // unsigned long diffT2 = 0, diffCpy = 0;
+
   size_t totCpy = 0;
+  // t2 = rdtsc();
   while (logAux != NULL) {
     sizeToCpy = logAux->p.pos; // size in bytes
     nbEntries = logAux->p.pos/sizeof(HeTM_CPULogEntry);
+
     if (sizeToCpy <= 0 || nbEntries > sizeBuffer || logAux->chunk == NULL) {
       node = logAux;
       logAux = logAux->next;
       continue;
     }
 
+    // t3 = rdtsc();
+    // diffT2 += t3-t2;
+    if (HeTM_shared_data.batchCount == 1) {
+      CUDA_EVENT_RECORD(threadData->cpyLogChunkStartEvent[
+        threadData->logChunkEventCounter % STM_LOG_BUFFER_SIZE], stream);
+    }
     if (CUDA_CPY_TO_DEV_ASYNC(resAux, logAux->chunk, sizeToCpy, stream) != cudaSuccess) {
       printf("ERROR copying Dev %p/%p <-- %p/%p Host (nbEntries=%zu) \n"
              "           BUFFER=%p/%p totalCpy=%zu maxSize=%zu\n",
@@ -253,6 +309,13 @@ void HeTM_wset_log_cpy_to_gpu(
         ((HeTM_CPULogEntry*)HeTM_shared_data.wsetLog) + HeTM_shared_data.wsetLogSize,
         totCpy, sizeBuffer*sizeof(HeTM_CPULogEntry));
     }
+    if (HeTM_shared_data.batchCount == 1) {
+      CUDA_EVENT_RECORD(threadData->cpyLogChunkStopEvent[
+        threadData->logChunkEventCounter % STM_LOG_BUFFER_SIZE], stream);
+    }
+    threadData->logChunkEventCounter++; // uses the next event to collect time
+    // t4 = rdtsc();
+    // diffCpy += t4-t3;
 
     threadData->curCopyNb++;
 
@@ -271,9 +334,11 @@ void HeTM_wset_log_cpy_to_gpu(
       // no more space in the buffer try latter
       break;
     }
+    // t2 = rdtsc();
   }
-  CUDA_EVENT_RECORD(threadData->cpyWSetStopEvent, stream);
+
   // printf("set threadData->curCopyNb = %i\n", threadData->curCopyNb);
+
   if (totCpy > 0) {
     CUDA_CHECK_ERROR(cudaStreamAddCallback(
       stream, cpyCallback, threadData, 0
@@ -281,6 +346,12 @@ void HeTM_wset_log_cpy_to_gpu(
   } else {
     threadData->isCpyDone = 1;
   }
+  threadData->isCopying = 0; // next one can come in
+
+  // unsigned long t1 = rdtsc();
+  //
+  // printf("!%2i! after set curCopyNb=%2i did %2i passes in %lu kCycles, diffT2 = %lu kCycles, diffCpy = %lu kCycles\n",
+  //   threadData->id, threadData->curCopyNb, count, (t1-t0) / 1000, diffT2 / 1000, diffCpy / 1000);
 
   HeTM_stats_data.sizeCpyLogs += totCpy;
   // HeTM_stats_data.sizeCpyWSet += sizeBuffer - totCpy; // empty space
@@ -340,12 +411,14 @@ void* HeTM_map_cpu_to_cpu(void *origin)
   return (void*)(o - dev + host);
 }
 
-int HeTM_reset_GPU_state()
+int HeTM_reset_GPU_state(long batchCount)
 {
   // CUDA_CHECK_ERROR(cudaMemset(PR_lockTableDev, 0, PR_LOCK_TABLE_SIZE*sizeof(int)), "");
-  HeTM_reset_inter_confl_flag();
-  memman_select("HeTM_dev_rset");
-  memman_zero_gpu(NULL);
+  // HeTM_reset_inter_confl_flag(); // reset elsewhere
+  if ((batchCount & 0xff) == 0xff) { // at some round --> reset
+    memman_select("HeTM_dev_rset");
+    memman_zero_gpu(NULL);
+  }
   return 0;
 }
 
@@ -372,11 +445,13 @@ static void CUDART_CB cpyCallback(cudaStream_t event, cudaError_t status, void *
 static void init_mempool(size_t pool_size)
 {
   size_t granBmap;
+  memman_alloc_dual("HeTM_mempool", pool_size,
 #ifdef USE_UNIF_MEM
-  memman_alloc_dual("HeTM_mempool", pool_size, MEMMAN_UNIF);
+    MEMMAN_UNIF
 #else /* !USE_UNIF_MEM */
-  memman_alloc_dual("HeTM_mempool", pool_size, MEMMAN_NONE);
+    MEMMAN_NONE
 #endif /* USE_UNIF_MEM */
+  );
   HeTM_shared_data.devMemPool  = memman_get_gpu(NULL);
   HeTM_shared_data.hostMemPool = memman_get_cpu(NULL);
   HeTM_shared_data.sizeMemPool = pool_size;
@@ -391,29 +466,24 @@ static void init_mempool(size_t pool_size)
   memman_create_bitmap(HeTM_shared_data.hostMemPool, HeTM_shared_data.devMemPool, bitmapGran);
   memman_bitmap_gpu(); // creates in GPU (TODO: change name)
   memman_bmap_s *mainBMap = (memman_bmap_s*) memman_get_bmap(&granBmap);
+  HeTM_shared_data.devMemPoolBmap = mainBMap->dev;
   stm_devMemPoolBmap = mainBMap;
 
-#ifdef HETM_DISABLE_CHUNKS
-  memman_set_is_bmapped(0, 0);
-  memman_alloc_gpu("HeTM_mempool_backup", pool_size,
-    HeTM_shared_data.hostMemPool, MEMMAN_NONE);
-  HeTM_shared_data.devMemPoolBackup = memman_get_gpu(NULL);
-  HeTM_shared_data.devMemPoolBackupBmap = memman_get_bmap(NULL);
-  stm_devMemPoolBackupBmap = NULL;
-#else /* HETM_CHUNKS enabled */
   memman_set_is_bmapped(1, 1);
   memman_alloc_gpu("HeTM_mempool_backup", pool_size,
     HeTM_shared_data.hostMemPool, MEMMAN_NONE);
-  memman_create_bitmap(memman_get_cpu(NULL), memman_get_gpu(NULL), bitmapGran);
+  HeTM_shared_data.hostBackupMemPool = memman_get_cpu(NULL);
+  HeTM_shared_data.devBackupMemPool = memman_get_gpu(NULL);
+  memman_create_bitmap(HeTM_shared_data.hostBackupMemPool, HeTM_shared_data.devBackupMemPool, bitmapGran);
   memman_bitmap_gpu(); // creates in GPU (TODO: change name)
   memman_bmap_s *backupBMap = (memman_bmap_s*) memman_get_bmap(NULL);
+  HeTM_shared_data.devBackupMemPoolBmap = backupBMap->dev;
   stm_devMemPoolBackupBmap = backupBMap;
 
   memman_attach_bmap(stm_devMemPoolBackupBmap, granBmap);
   memman_set_is_bmapped(1, 1);
   HeTM_shared_data.devMemPoolBackup = memman_get_gpu(NULL);
   HeTM_shared_data.devMemPoolBackupBmap = memman_get_bmap(NULL);
-#endif /* HETM_DISABLE_CHUNKS */
 
   // GPU-side write-set for chunk copy
   memman_alloc_gpu("HeTM_mempool_backup_bmap", sizeof(memman_bmap_s), backupBMap, MEMMAN_NONE);
@@ -484,13 +554,6 @@ static void init_bmap(size_t pool_size)
   memman_select("HeTM_mempool");
   memman_bmap_s *mainBMap = (memman_bmap_s*) memman_get_bmap(&granBmap);
 
-#ifdef HETM_DISABLE_CHUNKS
-  // memman_alloc_gpu("HeTM_mempool_backup", pool_size,
-  //   HeTM_shared_data.hostMemPool, MEMMAN_NONE);
-  // HeTM_shared_data.devMemPoolBackup = memman_get_gpu(NULL);
-  // stm_devMemPoolBackupBmap = NULL;
-  memman_alloc_dual("HeTM_cpu_wset", nbGranules, MEMMAN_NONE);
-#else /* HETM CHUNKS ENABLED */
   // memman_alloc_gpu("HeTM_mempool_backup", pool_size,
   //   HeTM_shared_data.hostMemPool, MEMMAN_NONE);
   // // memman_create_bitmap(memman_get_cpu(NULL), NULL, bitmapGran);
@@ -501,7 +564,6 @@ static void init_bmap(size_t pool_size)
   memman_alloc_dual("HeTM_cpu_wset", nbGranules, MEMMAN_NONE);
   memman_attach_bmap(stm_devMemPoolBackupBmap, granBmap / 4); /* 1B maps 4B */
   memman_set_is_bmapped(1, 0);
-#endif /* HETM_DISABLE_CHUNKS */
 
   memman_zero_cpu(NULL);
   memman_zero_gpu(NULL);
@@ -556,11 +618,8 @@ static void init_addr(size_t pool_size)
   // bmap for the data-set chunking
   memman_create_bitmap(memman_get_cpu(NULL), memman_get_gpu(NULL), bitmapGran);
   memman_bitmap_gpu(); // creates in GPU
-#ifdef HETM_DISABLE_CHUNKS
-  memman_set_is_bmapped(0, 0);
-#else /* HETM_CHUNKS enabled */
   memman_set_is_bmapped(0, 1);
-#endif /* HETM_DISABLE_CHUNKS */
+
   memman_bmap_s *mainBMap = (memman_bmap_s*) memman_get_bmap(NULL);
   memman_alloc_gpu("HeTM_mempool_bmap", sizeof(memman_bmap_s), mainBMap, MEMMAN_NONE);
 
@@ -621,11 +680,8 @@ static void init_vers2(size_t pool_size) {
   // bmap for the data-set chunking
   memman_create_bitmap(memman_get_cpu(NULL), memman_get_gpu(NULL), bitmapGran);
   memman_bitmap_gpu(); // creates in GPU
-#ifdef HETM_DISABLE_CHUNKS
-  memman_set_is_bmapped(0, 0);
-#else /* HETM_CHUNKS enabled */
   memman_set_is_bmapped(0, 1);
-#endif /* HETM_DISABLE_CHUNKS */
+
   memman_bmap_s *mainBMap = (memman_bmap_s*) memman_get_bmap(NULL);
   memman_alloc_gpu("HeTM_mempool_bmap", sizeof(memman_bmap_s), mainBMap, MEMMAN_NONE);
 
@@ -636,7 +692,7 @@ static void init_vers2(size_t pool_size) {
   stm_baseMemPool = HeTM_shared_data.hostMemPool;
 
   // Inits versions buffer
-  size_t sizeVersion = nbGranules*sizeof(long);
+  size_t sizeVersion = nbGranules*sizeof(int32_t);
   memman_alloc_gpu("HeTM_versions", sizeVersion, NULL, MEMMAN_NONE);
   memman_select("HeTM_versions");
   HeTM_shared_data.devVersions = memman_get_gpu(NULL);

@@ -6,5 +6,6 @@
  __thread uintptr_t HeTM_bufVers[HETM_BUFFER_MAXSIZE];
  __thread size_t HeTM_ptr;
  __thread uintptr_t HeTM_version;
+ __thread uint64_t HeTM_htmRndSeed = 0x000012348231ac4e;
 
 int errors[MAX_THREADS][HTM_NB_ERRORS];

@@ -30,8 +30,8 @@ extern size_t accountsSize;
 extern size_t sizePool;
 extern void* gpuMempool;
 
-const static int NB_OF_GPU_BUFFERS = 4; // GPU receives some more space
-const static int NB_CPU_TXS_PER_THREAD = 8192;
+const static int NB_OF_GPU_BUFFERS = 64; // GPU receives some more space
+const static int NB_CPU_TXS_PER_THREAD = 16384;
 
 extern size_t currMaxCPUoutputBufferSize;
 extern size_t currCPUoutputBufferPtr;
@@ -42,6 +42,5 @@ extern int lockOutputBuffer;
 
 extern FILE *GPU_input_file;
 extern FILE *CPU_input_file;
-
 
 #endif /* MEMCD_H_GUARD */

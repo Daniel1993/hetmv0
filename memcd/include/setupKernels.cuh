@@ -18,7 +18,6 @@
   } \
 //
 
-int HeTM_setup_bankTx(int nbBlocks, int nbThreads);
 int HeTM_bankTx_cpy_IO();
 int HeTM_teardown_bankTx();
 
