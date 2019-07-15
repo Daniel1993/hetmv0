@@ -1,20 +1,8 @@
 #!/bin/bash
 
-# This starts are bank/scripts
-#cd .. # goes to bank folder
-
-iter=1
-filename_tsx="Bank_TSX"
-filename_tiny="Bank_Tiny"
-
-GPU_PART="1.0"
-CPU_PART="0.0"
-P_INTERSECT="0.0"
-DURATION=30000
-BLOCKS="2 4 8 16 32 64 256 512 1024" # 512
-THREADS="512" #"2 4 8 16 32 64 96 256 320 512 640 768 1024"
+DURATION=20000
 BATCH_SIZE="4"
-SAMPLES=1
+SAMPLES=3
 #./makeTM.sh
 
 CPU_THREADS=4
@@ -27,15 +15,18 @@ SMALL_VERY_HIGH_CPU_THREADS=14
 rm -f Bank.csv GPUload.csv CPUload.csv
 
 LARGE_DATASET=1000000
+LCONFL_SPACE=500000
 VSMALL_DATASET=100000
+SCONFL_SPACE=50000
 
-GPU_BLOCKS=160
+GPU_BLOCKS=40
 GPU_THREADS=256
 
-CPU_BACKOFF=30
-GPU_BACKOFF=15000
+CPU_BACKOFF=1
+GPU_BACKOFF=16000
 
-CPU_THREADS=14
+CPU_THREADS=8
+CPU_TIME=0.02
 
 SIZE_ZIPF=2000000
 GPU_INPUT="GPU_input_${SIZE_ZIPF}_099_25165824.txt"
@@ -124,14 +115,14 @@ function actualRun {
 function doRun_HeTM_SHARED_steal {
 	# BANK_PART=3 --> unif rand
 	make clean ; make CMP_TYPE=COMPRESSED BANK_PART=6 \
-		PR_MAX_RWSET_SIZE=20 LOG_TYPE=${2} USE_TSX_IMPL=1 PROFILE=1 -j 14 \
-		BENCH=MEMCD CPU_STEAL_ONLY_GETS=0 >/dev/null
+		PR_MAX_RWSET_SIZE=20 LOG_TYPE=VERS USE_TSX_IMPL=1 PROFILE=1 -j 14 \
+		BENCH=MEMCD CPU_STEAL_ONLY_GETS=0 DISABLE_NON_BLOCKING=${1} \
+		LOG_SIZE=4096 STM_LOG_BUFFER_SIZE=256 OVERLAP_CPY_BACK=${2} >/dev/null
 	for s in `seq 1 $SAMPLES`
 	do
 		# ### DO GPU load
 		actualRun GPUload 0.0 0.0
-		cp GPUload.csv CPUload.csv
-		cp GPUload.csv CPUload_GETs.csv
+		# cp GPUload.csv CPUload.csv
 		# actualRun GPUload 0.0 0.1
 		actualRun GPUload 0.0 0.2
 		# actualRun GPUload 0.0 0.3
@@ -144,39 +135,20 @@ function doRun_HeTM_SHARED_steal {
 		actualRun GPUload 0.0 1.0
 		### DO CPU load
 		# actualRun CPUload 0.1 0.0
-		actualRun CPUload 0.2 0.0
-		# actualRun CPUload 0.3 0.0
-		actualRun CPUload 0.4 0.0
-		# actualRun CPUload 0.5 0.0
-		actualRun CPUload 0.6 0.0
-		# actualRun CPUload 0.7 0.0
-		actualRun CPUload 0.8 0.0
-		# actualRun CPUload 0.9 0.0
-		actualRun CPUload 1.0 0.0
+		# actualRun CPUload 0.2 0.0
+		# # actualRun CPUload 0.3 0.0
+		# actualRun CPUload 0.4 0.0
+		# # actualRun CPUload 0.5 0.0
+		# actualRun CPUload 0.6 0.0
+		# # actualRun CPUload 0.7 0.0
+		# actualRun CPUload 0.8 0.0
+		# # actualRun CPUload 0.9 0.0
+		# actualRun CPUload 1.0 0.0
 		###
-		mv GPUload.csv ${1}_GPUload_s${s}
+		mv GPUload.csv ${3}_GPUload_s${s}
 		# # rm GPUload.csv
-		mv CPUload.csv ${1}_CPUload_s${s}
+		# mv CPUload.csv ${3}_CPUload_s${s}
 	done
-	# make clean ; make CMP_TYPE=COMPRESSED BANK_PART=2 \
-	# 	PR_MAX_RWSET_SIZE=20 LOG_TYPE=${2} USE_TSX_IMPL=1 PROFILE=1 -j 14 \
-	# 	BENCH=MEMCD CPU_STEAL_ONLY_GETS=1 >/dev/null
-	# for s in `seq 1 $SAMPLES`
-	# do
-	# 	### DO CPU load
-	# 	# actualRun CPUload_GETs 0.0 0.1
-	# 	actualRun CPUload_GETs 0.0 0.2
-	# 	# actualRun CPUload_GETs 0.0 0.3
-	# 	# actualRun CPUload_GETs 0.0 0.4
-	# 	# # actualRun CPUload 0.5 0.0
-	# 	# actualRun CPUload_GETs 0.0 0.5
-	# 	# actualRun CPUload 0.7 0.0
-	# 	actualRun CPUload_GETs 0.0 0.8
-	# 	# actualRun CPUload 0.9 0.0
-	# 	actualRun CPUload_GETs 0.0 1.0
-	# 	###
-	# 	mv CPUload_GETs.csv ${1}_CPUload_GETs_s${s}
-	# done
 }
 
 DATASET=$LARGE_DATASET
@@ -189,161 +161,19 @@ CPU_INPUT="CPU_input_${SIZE_ZIPF}_099_1310720.txt"
 
 NB_CONFL_CPU_BUFFER=0
 
-GPU_BLOCKS=128
-GPU_THREADS=128
+GPU_BLOCKS=40
+GPU_THREADS=256
 # GPU_THREADS=256
 
-CONFL_SPACE=1000
-NB_CONFL_GPU_BUFFER=100
-doRun_HeTM_SHARED_steal CNFL_1000_BFF_SZ_100 VERS
-# doRun_HeTM_SHARED_steal memcd_SHARED_steal_BMAP_LARGE_B_64k BMAP
+DATASET=$LARGE_DATASET
+CONFL_SPACE=$LCONFL_SPACE
+doRun_HeTM_SHARED_steal 0 1 memcd_LARGE_NON_BLOC_OVER
+doRun_HeTM_SHARED_steal 1 0 memcd_LARGE_BLOC
+DATASET=$VSMALL_DATASET
+CONFL_SPACE=$SCONFL_SPACE
+doRun_HeTM_SHARED_steal 0 1 memcd_SMALL_NON_BLOC_OVER
+doRun_HeTM_SHARED_steal 1 0 memcd_SMALL_BLOC
 
-NB_CONFL_GPU_BUFFER=1000
-doRun_HeTM_SHARED_steal CNFL_1000_BFF_SZ_1000 VERS
-
-CONFL_SPACE=10000
-NB_CONFL_GPU_BUFFER=100
-doRun_HeTM_SHARED_steal CNFL_10000_BFF_SZ_100 VERS
-
-NB_CONFL_GPU_BUFFER=1000
-doRun_HeTM_SHARED_steal CNFL_10000_BFF_SZ_1000 VERS
-
-CONFL_SPACE=100000
-NB_CONFL_GPU_BUFFER=100
-doRun_HeTM_SHARED_steal CNFL_100000_BFF_SZ_100 VERS
-
-NB_CONFL_GPU_BUFFER=1000
-doRun_HeTM_SHARED_steal CNFL_100000_BFF_SZ_1000 VERS
-
-CONFL_SPACE=1000000
-NB_CONFL_GPU_BUFFER=100
-doRun_HeTM_SHARED_steal CNFL_1000000_BFF_SZ_100 VERS
-
-NB_CONFL_GPU_BUFFER=1000
-doRun_HeTM_SHARED_steal CNFL_1000000_BFF_SZ_1000 VERS
-
-# doRun_GPUonly memcd_GPUonly_LARGE_B_64k
-# doRun_CPUonly memcd_CPUonly_LARGE_B_64k
-
-# ### 128 k
-#
-# GPU_BLOCKS=128
-# GPU_THREADS=256
-# # GPU_THREADS=256
-# doRun_HeTM_SHARED_steal memcd_SHARED_steal_VERS_LARGE_B_128k VERS
-# doRun_HeTM_SHARED_steal memcd_SHARED_steal_BMAP_LARGE_B_128k BMAP
-# #
-# # doRun_GPUonly memcd_GPUonly_LARGE_B_128k
-# # doRun_CPUonly memcd_CPUonly_LARGE_B_128k
-#
-# ### 256 k
-#
-# GPU_BLOCKS=256
-# GPU_THREADS=256
-# # GPU_THREADS=256
-# doRun_HeTM_SHARED_steal memcd_SHARED_steal_VERS_LARGE_B_256k VERS
-# doRun_HeTM_SHARED_steal memcd_SHARED_steal_BMAP_LARGE_B_256k BMAP
-# #
-# # doRun_GPUonly memcd_GPUonly_LARGE_B_256k
-# # doRun_CPUonly memcd_CPUonly_LARGE_B_256k
-#
-# ### 512 k
-#
-# GPU_BLOCKS=512
-# GPU_THREADS=256
-# # GPU_THREADS=256
-# doRun_HeTM_SHARED_steal memcd_SHARED_steal_VERS_LARGE_B_512k VERS
-# doRun_HeTM_SHARED_steal memcd_SHARED_steal_BMAP_LARGE_B_512k BMAP
-# #
-# # doRun_GPUonly memcd_GPUonly_LARGE_B_512k
-# # doRun_CPUonly memcd_CPUonly_LARGE_B_512k
-#
-# ### 1 M
-
-# GPU_BLOCKS=512
-# GPU_THREADS=512
-# # GPU_THREADS=256
-# doRun_HeTM_SHARED_steal memcd_SHARED_steal_VERS_LARGE_B_1M VERS
-# doRun_HeTM_SHARED_steal memcd_SHARED_steal_BMAP_LARGE_B_1M BMAP
-#
-# doRun_GPUonly memcd_GPUonly_LARGE_B_1M
-# doRun_CPUonly memcd_CPUonly_LARGE_B_1M
-
-
-# GPU_THREADS=512
-# doRun_HeTM_SHARED_steal memcd_SHARED_steal_VERS_LARGE_Lk_Lb VERS
-# doRun_HeTM_SHARED_steal memcd_SHARED_steal_BMAP_LARGE_Lk_Lb BMAP
-#
-# doRun_GPUonly memcd_GPUonly_LARGE_Lk_Lb
-# doRun_CPUonly memcd_CPUonly_LARGE_Lk_Lb
-
-# doRun_HeTM memcd_VERS_LARGE VERS
-# doRun_HeTM memcd_BMAP_LARGE BMAP
-
-#################################
-#
-# DATASET=$VSMALL_DATASET
-# #GPU_BLOCKS=256
-# # GPU_BLOCKS=512
-#
-# # doRun_HeTM_SHARED_noConfl memcd_SHARED_noConfl_VERS_SMALL VERS
-# # doRun_HeTM_SHARED_noConfl memcd_SHARED_noConfl_BMAP_SMALL BMAP
-#
-# SIZE_ZIPF=2000000
-# GPU_INPUT="GPU_input_${SIZE_ZIPF}_099_25165824.txt"
-# CPU_INPUT="CPU_input_${SIZE_ZIPF}_099_1310720.txt"
-#
-# ### 64 k
-#
-# GPU_THREADS=128
-# GPU_BLOCKS=128
-# # GPU_THREADS=256
-# doRun_HeTM_SHARED_steal memcd_SHARED_steal_VERS_SMALL_B_64k VERS
-# doRun_HeTM_SHARED_steal memcd_SHARED_steal_BMAP_SMALL_B_64k BMAP
-#
-# doRun_GPUonly memcd_GPUonly_SMALL_B_64k
-# doRun_CPUonly memcd_CPUonly_SMALL_B_64k
-# #
-# # ### 128 k
-# #
-# # GPU_THREADS=128
-# # GPU_BLOCKS=256
-# # # GPU_THREADS=256
-# # doRun_HeTM_SHARED_steal memcd_SHARED_steal_VERS_SMALL_B_128k VERS
-# # doRun_HeTM_SHARED_steal memcd_SHARED_steal_BMAP_SMALL_B_128k BMAP
-# # #
-# # # doRun_GPUonly memcd_GPUonly_SMALL_B_128k
-# # # doRun_CPUonly memcd_CPUonly_SMALL_B_128k
-# #
-# # ### 256 k
-# #
-# # GPU_THREADS=256
-# # GPU_BLOCKS=256
-# # # GPU_THREADS=256
-# # doRun_HeTM_SHARED_steal memcd_SHARED_steal_BMAP_SMALL_B_256k BMAP
-# # doRun_HeTM_SHARED_steal memcd_SHARED_steal_VERS_SMALL_B_256k VERS
-# # #
-# # # doRun_GPUonly memcd_GPUonly_SMALL_B_256k
-# # # doRun_CPUonly memcd_CPUonly_SMALL_B_256k
-# #
-# # ### 512 k
-# #
-# # GPU_THREADS=512
-# # GPU_BLOCKS=256
-# # # GPU_THREADS=256
-# # doRun_HeTM_SHARED_steal memcd_SHARED_steal_VERS_SMALL_B_512k VERS
-# # doRun_HeTM_SHARED_steal memcd_SHARED_steal_BMAP_SMALL_B_512k BMAP
-# # #
-# # # doRun_GPUonly memcd_GPUonly_SMALL_B_512k
-# # # doRun_CPUonly memcd_CPUonly_SMALL_B_512k
-#
-# ### 1 M
-#
-# # GPU_THREADS=512
-# # GPU_BLOCKS=256
-# # # GPU_THREADS=256
-# # doRun_HeTM_SHARED_steal memcd_SHARED_steal_VERS_SMALL_B_1M VERS
-# # doRun_HeTM_SHARED_steal memcd_SHARED_steal_BMAP_SMALL_B_1M BMAP
-# #
-# # doRun_GPUonly memcd_GPUonly_SMALL_B_1M
-# # doRun_CPUonly memcd_CPUonly_SMALL_B_1M
+mkdir -p DATA_memcdInterConfl
+mv memcd_SMALL*_s* DATA_memcdInterConfl
+mv memcd_LARGE*_s* DATA_memcdInterConfl

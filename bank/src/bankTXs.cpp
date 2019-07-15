@@ -11,6 +11,10 @@
 #include "CheckAllFlags.h"
 #include "input_handler.h"
 
+#ifndef HETM_BANK_PART_SCALE
+#define HETM_BANK_PART_SCALE 10
+#endif /* HETM_BANK_PART_SCALE */
+
 thread_local static unsigned someSeed = 0x034e3115;
 
 int transfer2(account_t *accounts, volatile unsigned *positions, int isInter, int count, int tid, int nbAccounts)
@@ -18,7 +22,12 @@ int transfer2(account_t *accounts, volatile unsigned *positions, int isInter, in
 	volatile int i;
 	int z = 0;
 	int n;
+
+#if BANK_PART == 10
+	void *pos[count*HETM_BANK_PART_SCALE];
+#else
 	void *pos[count];
+#endif
 	void *pos_write;
 	int accountIdx;
 	unsigned seedCopy = someSeed;
@@ -51,12 +60,23 @@ int transfer2(account_t *accounts, volatile unsigned *positions, int isInter, in
 
 	seedCopy = seedState;
 
-	for (n = 0; n < count; n++) {
+	int forLoop = count;
+
+#if BANK_PART == 10
+	forLoop *= HETM_BANK_PART_SCALE;
+#endif
+
+	for (n = 0; n < forLoop; n++) {
 		randNum = RAND_R_FNC(seedCopy);
 		if (!isInter) {
 			accountIdx = CPU_ACCESS(randNum, nbAccounts);
 		} else {
-				accountIdx = randNum % nbAccounts;
+#if BANK_PART == 9
+			// deterministic abort
+			accountIdx = /*(n == 0) ? tid * 64 : */INTERSECT_ACCESS_CPU(randNum, nbAccounts);
+#else
+			accountIdx = INTERSECT_ACCESS_CPU(randNum, nbAccounts);
+#endif /* BANK_PART == 9 */
 		}
 		pos[n] = accounts + accountIdx;
 		int someLoad = TM_LOAD(accounts + accountIdx);
@@ -67,6 +87,10 @@ int transfer2(account_t *accounts, volatile unsigned *positions, int isInter, in
 
 	seedCopy = seedState;
 
+#if BANK_PART == 10
+	forLoop = count;
+#endif
+
 	// TODO: store must be controlled with parsedData.access_controller
 	// -----------------
 	for (n = 0; n < count; n++) {
@@ -74,7 +98,12 @@ int transfer2(account_t *accounts, volatile unsigned *positions, int isInter, in
 		if (!isInter) {
 			accountIdx = CPU_ACCESS(randNum, nbAccounts);
 		} else {
-			accountIdx = randNum % nbAccounts;
+#if BANK_PART == 9
+			// deterministic abort
+			accountIdx = /*(n == 0) ? tid * 64 : */INTERSECT_ACCESS_CPU(randNum, nbAccounts);
+#else
+			accountIdx = INTERSECT_ACCESS_CPU(randNum, nbAccounts);
+#endif /* BANK_PART == 9 */
 		}
 		TM_STORE(accounts + accountIdx, count_amount * input);
 		// TM_STORE(pos[n], count_amount * input);
@@ -105,13 +134,21 @@ int readOnly2(account_t *accounts, volatile unsigned *positions, int isInter, in
 	RAND_R_FNC(someSeed);
 
   TM_START(z, RW);
+#if BANK_PART == 10
+	count *= HETM_BANK_PART_SCALE;
+#endif
 
 	for (n = 0; n < count; n++) {
 		randNum = RAND_R_FNC(someSeed);
 		if (!isInter) {
 			accountIdx = CPU_ACCESS(randNum, nbAccounts);
 		} else {
-			accountIdx = randNum % nbAccounts;
+#if BANK_PART == 9
+			// deterministic abort
+			accountIdx = /*(n == 0) ? tid * 64 : */INTERSECT_ACCESS_CPU(randNum, nbAccounts);
+#else
+			accountIdx = INTERSECT_ACCESS_CPU(randNum, nbAccounts);
+#endif /* BANK_PART == 9 */
 		}
 		int someLoad = TM_LOAD(accounts + accountIdx);
 		count_amount += someLoad * input;

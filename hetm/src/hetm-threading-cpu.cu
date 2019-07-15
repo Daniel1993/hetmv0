@@ -200,12 +200,15 @@ static void asyncCpy(void *argsPtr)
   // if (HeTM_get_GPU_status() == HETM_BATCH_RUN &&
   //     ((nbChunksSent % 4 == 0 && (nbChunksSent > 5 && nbChunksSent < 13)) ||
   //     (nbChunksSent % 24 == 0 && (nbChunksSent > 23 && nbChunksSent < 49)))) {
+#ifndef HETM_DISABLE_EARLY_VALIDATION
   if (HeTM_get_GPU_status() == HETM_BATCH_RUN &&
-      (nbChunksSent == 32 || nbChunksSent == 64 || nbChunksSent == 128)) {
+      (nbChunksSent == 8 || nbChunksSent == 32 || nbChunksSent == 16
+        || nbChunksSent == 64 || nbChunksSent == 128)) {
     // TODO: do not test for conflicts so frequently
     asyncCmpOnly(argsPtr);
     HeTM_set_is_interconflict(HeTM_get_inter_confl_flag(threadData->stream, 0));
   }
+#endif /* DISABLE_EARLY_VALIDATION */
 #endif
 }
 

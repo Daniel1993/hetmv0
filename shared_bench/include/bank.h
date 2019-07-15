@@ -214,7 +214,7 @@ struct thread_data {
   int trfs;
   int trans;
 
-	int prec_write_txs;
+	float prec_write_txs;
 	int access_controller;
 	int access_offset;
 

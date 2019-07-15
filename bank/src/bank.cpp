@@ -10,6 +10,7 @@
 #include "bank_aux.h"
 #include "CheckAllFlags.h"
 #include "input_handler.h"
+#include "rdtsc.h"
 
 /* ################################################################### *
 * GLOBALS
@@ -129,30 +130,26 @@ static int fill_GPU_input_buffers()
 		cpu_ptr[i] = rnd % parsedData.nb_accounts;
 	}
 
-#elif BANK_PART == 4 /* Zipf: from file */
+#elif BANK_PART == 4 /* Zipf */
 
-	GPU_input_file = fopen(parsedData.GPUInputFile, "r");
+	unsigned maxGen = parsedData.nb_accounts;
+	zipf_setup(maxGen, 0.8);
+	unsigned rnd;
 
-	unsigned rnd; // RAND_R_FNC(input_seed);
 	for (int i = 0; i < buffer_last; ++i) {
-		// int access = GPU_ACCESS(rnd, (parsedData.nb_accounts-BANK_NB_TRANSFERS-1));
-		if (fscanf(GPU_input_file, "%i\n", &rnd) == EOF) {
-			printf("[%i] GPU error reading from file\n", i);
-		}
-		cpu_ptr[i] = rnd % parsedData.nb_accounts;
+		rnd = zipf_gen();
+		cpu_ptr[i] = rnd;
 	}
 
 	memman_select("GPU_input_buffer_bad");
 	cpu_ptr = (int*)memman_get_cpu(NULL);
 
-	cpu_ptr[0] = 0; // deterministic abort
-	for (int i = 1; i < buffer_last; ++i) {
-		if (fscanf(GPU_input_file, "%i\n", &rnd) == EOF) {
-			printf("[%i] GPU error reading from file\n", i);
-		}
-		cpu_ptr[i] = rnd % parsedData.nb_accounts + 1;
+	for (int i = 0; i < buffer_last; ++i) {
+		rnd = zipf_gen();
+		cpu_ptr[i] = rnd;
 	}
-#elif BANK_PART == 5 || BANK_PART == 9/* BANK_PART == 5 GPU workload with tunnable intra-conflicts */
+
+#elif BANK_PART == 5 || BANK_PART == 9 || BANK_PART == 10
 	// TODO: I should use more input buffers: some caching effects may show up
 	unsigned rnd = RAND_R_FNC(input_seed);
 	for (int i = 0; i < buffer_last; ++i) {
@@ -293,27 +290,24 @@ static int fill_CPU_input_buffers()
 	}
 #elif BANK_PART == 4
 
-	CPU_input_file = fopen(parsedData.CPUInputFile, "r");
+	unsigned maxGen = parsedData.nb_accounts;
+	zipf_setup(maxGen, 0.8);
+	unsigned rnd;
 
 	for (int i = 0; i < good_buffers_last; ++i) {
-		// unsigned rnd = (*zipf_dist)(generator); // RAND_R_FNC(input_seed);
-		unsigned rnd;
-		if (fscanf(CPU_input_file, "%i\n", &rnd) == EOF) {
-			printf("[%i] CPU error reading from file\n", i);
-		}
-		CPUInputBuffer[i] = CPU_ACCESS(parsedData.nb_accounts - rnd, parsedData.nb_accounts - 20);
+		rnd = zipf_gen();
+		CPUInputBuffer[i] = parsedData.nb_accounts - rnd;
 	}
-	CPUInputBuffer[good_buffers_last] = 0; // deterministic abort
+
+	memman_select("GPU_input_buffer_bad");
+	cpu_ptr = (int*)memman_get_cpu(NULL);
+
 	for (int i = good_buffers_last + 1; i < bad_buffers_last; ++i) {
-		// unsigned rnd = (*zipf_dist)(generator); // RAND_R_FNC(input_seed);
-		unsigned rnd; // RAND_R_FNC(input_seed);
-		if (fscanf(CPU_input_file, "%i\n", &rnd) == EOF) {
-			printf("[%i] CPU error reading from file\n", i);
-		}
-		CPUInputBuffer[i] = INTERSECT_ACCESS_CPU(parsedData.nb_accounts - rnd, parsedData.nb_accounts-20);
-		// CPUInputBuffer[i] |= 1;
+		rnd = zipf_gen();
+		CPUInputBuffer[i] = parsedData.nb_accounts - rnd;
 	}
-#elif BANK_PART == 5 || BANK_PART == 9 /* BANK_PART == 5 GPU workload with tunnable intra-conflicts */
+
+#elif BANK_PART == 5 || BANK_PART == 9 || BANK_PART == 10
 	unsigned reset_rnd = RAND_R_FNC(input_seed);
 	unsigned rnd = reset_rnd;
 	for (int i = 0; i < good_buffers_last; ++i) {
@@ -645,7 +639,7 @@ static void test(int id, void *data)
 			accounts_vec[i] = accounts_vec[i-1]+1;
 		}
 
-		if (rndOpt2 % 100 < d->prec_write_txs) {
+		if (rndOpt2 % 100000000 < (d->prec_write_txs * 1000000)) {
 			// 1% readIntensive
 			readIntensive(d->bank->accounts, accounts_vec, d->read_intensive_size, 1);
 		} else {
@@ -672,16 +666,15 @@ static void test(int id, void *data)
 			resReadOnly += readOnly(d->bank->accounts, accounts_vec, d->read_intensive_size, 1);
 		}
 
-#elif BANK_PART == 9
-		if (rndOpt2 % 100 < d->prec_write_txs) {
+#elif BANK_PART == 9 || BANK_PART == 10
+		if (rndOpt2 % 100000000 < (d->prec_write_txs * 1000000)) {
 			transfer2(d->bank->accounts, accounts_vec, isInterBatch, d->read_intensive_size, id, nb_accounts);
 		} else {
 			// resReadOnly += transferReadOnly(d->bank->accounts, accounts_vec, d->trfs, 1);
 			resReadOnly += readOnly2(d->bank->accounts, accounts_vec, isInterBatch, d->read_intensive_size, id, nb_accounts);
 		}
-
 #else /* BANK_PART == 5 */
-		if (rndOpt2 % 100 < d->prec_write_txs) {
+		if (rndOpt2 % 100000000 < (d->prec_write_txs * 1000000)) {
 			transfer(d->bank->accounts, accounts_vec, d->read_intensive_size, 1);
 		} else {
 			// resReadOnly += transferReadOnly(d->bank->accounts, accounts_vec, d->trfs, 1);
@@ -694,9 +687,8 @@ static void test(int id, void *data)
 
 	// asm volatile ("" ::: "memory");
 
-	volatile int spin = 0;
-	int randomBackoff = RAND_R_FNC(seed) % parsedData.CPU_backoff;
-	while (spin++ < randomBackoff);
+	volatile uint64_t tsc = rdtsc();
+	while ((rdtsc() - tsc) < parsedData.CPU_backoff);
 
 	// asm volatile ("" ::: "memory");
 
@@ -738,10 +730,27 @@ static void before_kernel(int id, void *data)
 
 static void after_kernel(int, void*) { /* empty: should it copy some stuff */ }
 
+static int nbBatches = 0;
+static int nbConflBatches = 0;
+
 static void before_batch(int id, void *data)
 {
 	RAND_R_FNC(seed); // updates the seed
 	isInterBatch = IS_INTERSECT_HIT( seed );
+
+	if (nbBatches % 3 == 0) {
+		// check the ratio
+		float ratio = ((float)nbConflBatches / (float)nbBatches);
+		if (ratio < P_INTERSECT && !isInterBatch) {
+			if (P_INTERSECT > 0) isInterBatch = 1;
+		} else if (ratio > P_INTERSECT && isInterBatch) {
+			if (P_INTERSECT < 1.0) isInterBatch = 0;
+		}
+	}
+
+	nbBatches++;
+	if (isInterBatch) nbConflBatches++;
+
 	__sync_synchronize();
 }
 

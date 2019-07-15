@@ -1,19 +1,6 @@
 #!/bin/bash
 
-# This starts are bank/scripts
-#cd .. # goes to bank folder
-
-iter=1
-filename_tsx="Bank_TSX"
-filename_tiny="Bank_Tiny"
-
-GPU_PART="1.0"
-CPU_PART="0.0"
-P_INTERSECT="0.0"
 DURATION=20000
-BLOCKS="2 4 8 16 32 64 256 512 1024" # 512
-THREADS="512" #"2 4 8 16 32 64 96 256 320 512 640 768 1024"
-BATCH_SIZE="4"
 SAMPLES=5
 #./makeTM.sh
 

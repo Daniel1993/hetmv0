@@ -170,6 +170,7 @@ typedef struct HeTM_statistics_ {
   long nbBatches, nbBatchesSuccess, nbBatchesFail;
   long nbTxsGPU, nbCommittedTxsGPU, nbDroppedTxsGPU, nbAbortsGPU;
   long nbTxsCPU, nbCommittedTxsCPU, nbDroppedTxsCPU, nbAbortsCPU;
+  long nbEarlyValAborts;
   size_t sizeCpyDataset, sizeCpyWSet /* ADDR|BMAP */, sizeCpyLogs /* ADDR|VERS */;
   size_t sizeCpyWSetCPUData;
   long nbBitmapConflicts;
@@ -178,6 +179,8 @@ typedef struct HeTM_statistics_ {
   double timeNonBlocking, timeBlocking;
   double timeCMP, timeAfterCMP;
   double timeGPU, timePRSTM;
+  double timeAbortedBatches;
+  double timeDtD;
   double timeCPU;
   double timeMemCpySum;
   double totalTimeCpyWSet, totalTimeCmp, totalTimeCpyDataset;

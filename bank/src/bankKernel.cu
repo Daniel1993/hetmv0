@@ -143,14 +143,14 @@ __device__ void readIntensive_tx(PR_txCallDefArgs, int txCount)
 	int tot_nb_threads = blockDim.x*gridDim.x;
 	// int need_to_extra_read = 1;
 
-	HeTM_GPU_log_s *GPU_log = (HeTM_GPU_log_s*)args.pr_args_ext;
-	long *state = GPU_log->state;
-	volatile int seedState;
+	// HeTM_GPU_log_s *GPU_log = (HeTM_GPU_log_s*)args.pr_args_ext;
+	// long *state = GPU_log->state;
+	// volatile int seedState;
 
 	// TODO: new parameter for the spins
-	for (i = 0; i < devParsedData.GPU_backoff; i++) {
-		state[id] += id + 1234 * i;
-	}
+	// for (i = 0; i < devParsedData.GPU_backoff; i++) {
+	// 	state[id] += id + 1234 * i;
+	// }
 
 	// TODO:
 	// random_KernelReadIntensive(PR_txCallArgs, idx, nbAccounts, is_intersection);
@@ -229,14 +229,14 @@ __device__ void readOnly_tx(PR_txCallDefArgs, int txCount)
 	int option = PR_rand(INT_MAX);
 	int tot_nb_threads = blockDim.x*gridDim.x;
 
-	HeTM_GPU_log_s *GPU_log = (HeTM_GPU_log_s*)args.pr_args_ext;
-	long *state = GPU_log->state;
-	volatile int seedState;
+	// HeTM_GPU_log_s *GPU_log = (HeTM_GPU_log_s*)args.pr_args_ext;
+	// long *state = GPU_log->state;
+	// volatile int seedState;
 
 	// TODO: new parameter for the spins
-	for (i = 0; i < devParsedData.GPU_backoff; i++) {
-		state[id] += id + 1234 * i;
-	}
+	// for (i = 0; i < devParsedData.GPU_backoff; i++) {
+	// 	state[id] += id + 1234 * i;
+	// }
 
 	idx[0] = (input_buffer[id+txCount*tot_nb_threads]) % nbAccounts;
 	#pragma unroll
@@ -286,6 +286,10 @@ __device__ void readOnly_tx(PR_txCallDefArgs, int txCount)
 #endif /* BANK_DISABLE_PRSTM */
 }
 
+#ifndef HETM_BANK_PART_SCALE
+#define HETM_BANK_PART_SCALE 10
+#endif /* HETM_BANK_PART_SCALE */
+
 __device__ void update_tx2(PR_txCallDefArgs, int txCount)
 {
 	int id = threadIdx.x+blockDim.x*blockIdx.x;
@@ -308,23 +312,33 @@ __device__ void update_tx2(PR_txCallDefArgs, int txCount)
 	volatile int seedState;
 
 	// TODO: new parameter for the spins
-	for (i = 0; i < devParsedData.GPU_backoff; i++) {
-		state[id] += id + 1234 * i;
-	}
+	// for (i = 0; i < devParsedData.GPU_backoff; i++) {
+	// 	state[id] += id + 1234 * i;
+	// }
 
 	volatile int nbRetries = 0;
 	PR_txBegin();
 	if (nbRetries++ > PR_maxNbRetries) break;
 
 	seedState = state[id];
+	int loopFor = read_intensive_size;
+
+#if BANK_PART == 10
+	loopFor *= HETM_BANK_PART_SCALE;
+#endif
 
 	// #pragma unroll
-	for (i = 0; i < read_intensive_size; i++) {
+	for (i = 0; i < loopFor; i++) {
 		randNum = PR_rand(INT_MAX);
 		if (!isInter) {
 			accountIdx = GPU_ACCESS(randNum, nbAccounts);
 		} else {
-			accountIdx = randNum % nbAccounts;
+#if BANK_PART == 9
+			// deterministic abort
+			accountIdx = /*(i == 0) ? id : */INTERSECT_ACCESS_GPU(randNum, nbAccounts);
+#else
+			accountIdx = INTERSECT_ACCESS_GPU(randNum, nbAccounts);
+#endif /* BANK_PART == 9 */
 		}
 		// printf("randNum = %u\n", randNum);
 		count_amount += PR_read(accounts + accountIdx);
@@ -338,7 +352,12 @@ __device__ void update_tx2(PR_txCallDefArgs, int txCount)
 		if (!isInter) {
 			accountIdx = GPU_ACCESS(randNum, nbAccounts);
 		} else {
-			accountIdx = randNum % nbAccounts;
+#if BANK_PART == 9
+			// deterministic abort
+			accountIdx = /*(i == 0) ? id : */INTERSECT_ACCESS_GPU(randNum, nbAccounts);
+#else
+			accountIdx = INTERSECT_ACCESS_GPU(randNum, nbAccounts);
+#endif /* BANK_PART == 9 */
 		}
 		// printf("randNum = %u\n", randNum);
 		// PR_read(accounts + accountIdx);
@@ -361,30 +380,39 @@ __device__ void readOnly_tx2(PR_txCallDefArgs, int txCount)
 	size_t nbAccounts = input->nbAccounts;
 	int *output_buffer = input->output_buffer;
 	int option = PR_rand(INT_MAX);
+	int loopFor = read_intensive_size;
 
 	unsigned randNum;
 	unsigned accountIdx;
 
-	HeTM_GPU_log_s *GPU_log = (HeTM_GPU_log_s*)args.pr_args_ext;
-	long *state = GPU_log->state;
-	volatile int seedState;
+	// HeTM_GPU_log_s *GPU_log = (HeTM_GPU_log_s*)args.pr_args_ext;
+	// long *state = GPU_log->state;
+	// volatile int seedState;
 
 	// TODO: new parameter for the spins
-	for (i = 0; i < devParsedData.GPU_backoff; i++) {
-		state[id] += id + 1234 * i;
-	}
+	// for (i = 0; i < devParsedData.GPU_backoff; i++) {
+	// 	state[id] += id + 1234 * i;
+	// }
 
 	int nbRetries = 0;
+#if BANK_PART == 10
+	loopFor *= HETM_BANK_PART_SCALE;
+#endif
 	PR_txBegin();
 	if (nbRetries++ > PR_maxNbRetries) break;
 
 	#pragma unroll
-	for (i = 0; i < read_intensive_size; i++) {
+	for (i = 0; i < loopFor; i++) {
 		randNum = PR_rand(INT_MAX);
 		if (!isInter) {
 			accountIdx = GPU_ACCESS(randNum, nbAccounts);
 		} else {
-			accountIdx = randNum % nbAccounts;
+#if BANK_PART == 9
+			// deterministic abort
+			accountIdx = /*(i == 0) ? id : */INTERSECT_ACCESS_GPU(randNum, nbAccounts);
+#else
+			accountIdx = INTERSECT_ACCESS_GPU(randNum, nbAccounts);
+#endif /* BANK_PART == 9 */
 		}
 		// printf("randNum = %u\n", randNum);
 		count_amount += PR_read(accounts + accountIdx);
@@ -417,14 +445,14 @@ __device__ void update_tx(PR_txCallDefArgs, int txCount)
 	unsigned writeAccountIdx;
 	unsigned readAccountIdx;
 
-	HeTM_GPU_log_s *GPU_log = (HeTM_GPU_log_s*)args.pr_args_ext;
-	long *state = GPU_log->state;
-	volatile int seedState;
+	// HeTM_GPU_log_s *GPU_log = (HeTM_GPU_log_s*)args.pr_args_ext;
+	// long *state = GPU_log->state;
+	// volatile int seedState;
 
 	// TODO: new parameter for the spins
-	for (i = 0; i < devParsedData.GPU_backoff; i++) {
-		state[id] += id + 1234 * i;
-	}
+	// for (i = 0; i < devParsedData.GPU_backoff; i++) {
+	// 	state[id] += id + 1234 * i;
+	// }
 
 	// before the transaction pick the accounts (needs PR-STM stuff)
 	// random_Kernel(PR_txCallArgs, idx, nbAccounts, is_intersection); //get random index
@@ -526,14 +554,14 @@ __device__ void updateReadOnly_tx(PR_txCallDefArgs, int txCount)
 	int option = PR_rand(INT_MAX);
 	int tot_nb_threads = blockDim.x*gridDim.x;
 
-	HeTM_GPU_log_s *GPU_log = (HeTM_GPU_log_s*)args.pr_args_ext;
-	long *state = GPU_log->state;
-	volatile int seedState;
+	// HeTM_GPU_log_s *GPU_log = (HeTM_GPU_log_s*)args.pr_args_ext;
+	// long *state = GPU_log->state;
+	// volatile int seedState;
 
 	// TODO: new parameter for the spins
-	for (i = 0; i < devParsedData.GPU_backoff; i++) {
-		state[id] += id + 1234 * i;
-	}
+	// for (i = 0; i < devParsedData.GPU_backoff; i++) {
+	// 	state[id] += id + 1234 * i;
+	// }
 
 	// before the transaction pick the accounts (needs PR-STM stuff)
 	// random_Kernel(PR_txCallArgs, idx, nbAccounts, is_intersection); //get random index
@@ -612,7 +640,7 @@ __global__ void bankTx(PR_globalKernelArgs)
 		__syncthreads();
 		if (option % 100 < prec_read_intensive) {
 			// TODO:
-			if (option2 % 100 < devParsedData.prec_write_txs) { // prec read-only
+			if (option2 % 100000000 < (devParsedData.prec_write_txs * 1000000)) { // prec read-only
 				readIntensive_tx(PR_txCallArgs, i);
 			} else {
 				readOnly_tx(PR_txCallArgs, i);
@@ -627,14 +655,14 @@ __global__ void bankTx(PR_globalKernelArgs)
 			} else {
 				readOnly_tx(PR_txCallArgs, i);
 			}
-#elif BANK_PART == 9
-			if (option2 % 100 < devParsedData.prec_write_txs) {
+#elif BANK_PART == 9 || BANK_PART == 10
+			if (option2 % 100000000 < (devParsedData.prec_write_txs * 1000000)) {
 				update_tx2(PR_txCallArgs, i);
 			} else {
 				readOnly_tx2(PR_txCallArgs, i);
 			}
 #else /* BANK_PART == 5 */
-			if (option2 % 100 < devParsedData.prec_write_txs) { // prec read-only
+			if (option2 % 100000000 < (devParsedData.prec_write_txs * 1000000)) { // prec read-only
 				update_tx(PR_txCallArgs, i);
 			} else {
 				readOnly_tx(PR_txCallArgs, i);
@@ -644,9 +672,8 @@ __global__ void bankTx(PR_globalKernelArgs)
 		}
 	}
 
-	// __syncthreads();
-	// volatile long lclock = clock64();
-	// while(clock64() - lclock < 1000000);
+	volatile uint64_t clockBefore = clock64();
+	while ((clock64() - clockBefore) < devParsedData.GPU_backoff);
 
 	PR_exitKernel();
 }

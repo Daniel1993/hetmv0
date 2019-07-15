@@ -144,25 +144,21 @@ int HeTM_mempool_cpy_to_cpu(size_t *copiedSize, long batchCount)
 
 int HeTM_mempool_cpy_to_gpu_backup(size_t *copiedSize, long batchCount)
 {
-#ifndef USE_UNIF_MEM
   // bitmaps copied elsewhere (memman_cpy_to_cpu_buffer_bitmap)
   memman_select("HeTM_mempool_backup");
   void *devPtr = memman_get_gpu(NULL);
   memman_select("HeTM_mempool");
   memman_cpy_to_gpu_backup(devPtr, HeTM_memStream, copiedSize, batchCount);
-#endif /* USE_UNIF_MEM */
   return 0; // TODO: error code
 }
 
 int HeTM_mempool_cpy_to_gpu_main(size_t *copiedSize, long batchCount)
 {
-#ifndef USE_UNIF_MEM
   // bitmaps copied elsewhere (memman_cpy_to_cpu_buffer_bitmap)
-  memman_select("HeTM_mempool"); // I've just inverted these lines
+  memman_select("HeTM_mempool");
   void *devPtr = memman_get_gpu(NULL);
   memman_select("HeTM_mempool_backup");
   memman_cpy_to_gpu_backup(devPtr, HeTM_memStream, copiedSize, batchCount);
-#endif /* USE_UNIF_MEM */
   return 0; // TODO: error code
 }
 

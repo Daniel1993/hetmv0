@@ -92,6 +92,7 @@ BANK_OBJS  := \
 	$(SRC)/cmp_kernels.o \
 	$(SHARED)/src/shared.o \
 	$(SRC)/setupKernels.o \
+	$(SRC)/zipf_dist.o \
 	$(SRC)/kernel.o
 
 MEMCD_OBJS  := \
@@ -137,7 +138,11 @@ $(APP): $(OBJS)
 		PROFILE=$(PROFILE) \
 		INST_CPU=$(INST_CPU) \
 		USE_UNIF_MEM=$(USE_UNIF_MEM) \
-		PRINT_DEB=$(PRINT_DEB)
+		PRINT_DEB=$(PRINT_DEB) \
+		DISABLE_EARLY_VALIDATION=$(DISABLE_EARLY_VALIDATION) \
+		REDUCED_RS=$(REDUCED_RS) \
+		DISABLE_RS=$(DISABLE_RS) \
+		DISABLE_WS=$(DISABLE_WS)
 	@echo " ============================================ "
 	@echo " === Building TinyMOD lib "
 	@echo " ============================================ "
@@ -177,7 +182,11 @@ $(APP): $(OBJS)
 		USE_UNIF_MEM=$(USE_UNIF_MEM) \
 		PRINT_DEB=$(PRINT_DEB) \
 		LOG_SIZE=$(LOG_SIZE) \
-		STM_LOG_BUFFER_SIZE=$(STM_LOG_BUFFER_SIZE)
+		DISABLE_EARLY_VALIDATION=$(DISABLE_EARLY_VALIDATION) \
+		STM_LOG_BUFFER_SIZE=$(STM_LOG_BUFFER_SIZE) \
+		REDUCED_RS=$(REDUCED_RS) \
+		DISABLE_RS=$(DISABLE_RS) \
+		DISABLE_WS=$(DISABLE_WS)
 	@echo "Linking..."
 	### TODO: optimization breaks performance
 	$(CXX) $(CXXFLAGS) -O0 -o $(SRC)/bankTXs.o $(SRC)/bankTXs.cpp

@@ -583,6 +583,10 @@ static void afterCPU(int id, void *data)
 
 // TODO: add a beforeBatch and afterBatch callbacks
 
+static int nbGPUStealBatches = 0;
+static int nbCPUStealBatches = 0;
+static int nbBatches = 0;
+
 static void before_batch(int id, void *data)
 {
 	// NOTE: now batch is selected based on the SHARED_QUEUE
@@ -597,9 +601,28 @@ static void before_batch(int id, void *data)
 	// }
 	// memman_cpy_to_gpu(NULL, NULL);
 
-	thread_local static unsigned long seed = 0x0012112A3112514A;
-	isCPUBatchSteal = (RAND_R_FNC(seed) % 10000) < (parsedData.CPU_steal_prob * 10000);
-	isGPUBatchSteal = (RAND_R_FNC(seed) % 10000) < (parsedData.GPU_steal_prob * 10000);
+	thread_local static unsigned long seed = 0x4FA3112E14A;
+	isCPUBatchSteal = (RAND_R_FNC(seed) % 1000) < (parsedData.CPU_steal_prob * 1000);
+	isGPUBatchSteal = (RAND_R_FNC(seed) % 1000) < (parsedData.GPU_steal_prob * 1000);
+
+	if (nbBatches % 3 == 0) {
+		// check the ratio
+		float ratioCPU = ((float)nbCPUStealBatches / (float)nbBatches);
+		float ratioGPU = ((float)nbGPUStealBatches / (float)nbBatches);
+		if (ratioCPU < parsedData.CPU_steal_prob && !isCPUBatchSteal) {
+			if (parsedData.CPU_steal_prob > 0) isCPUBatchSteal = 1;
+		} else if (ratioCPU > parsedData.CPU_steal_prob && isCPUBatchSteal) {
+			if (parsedData.CPU_steal_prob < 1.0) isCPUBatchSteal = 0;
+		} else if (ratioGPU < parsedData.GPU_steal_prob && !isGPUBatchSteal) {
+			if (parsedData.GPU_steal_prob > 0) isGPUBatchSteal = 1;
+		} else if (ratioGPU > parsedData.GPU_steal_prob && isGPUBatchSteal) {
+			if (parsedData.GPU_steal_prob > 0) isGPUBatchSteal = 0;
+		}
+	}
+
+	nbBatches++;
+	if (isGPUBatchSteal) nbGPUStealBatches++;
+	if (isCPUBatchSteal) nbCPUStealBatches++;
 }
 
 static void after_batch(int id, void *data)
@@ -1057,6 +1080,9 @@ int main(int argc, char **argv)
 	printf("GPU_start=%9li GPU_end=%9li\n", startInputPtr[GPU_QUEUE], endInputPtr[GPU_QUEUE]);
 	printf("SHARED_start=%9li SHARED_end=%9li\n", startInputPtr[SHARED_QUEUE], endInputPtr[SHARED_QUEUE]);
 	printf("nbOfGPUSetKernels=%i\n", nbOfGPUSetKernels);
+
+	printf("nbGPUStealBatches=%9i nbCPUStealBatches=%9i\n", nbGPUStealBatches, nbCPUStealBatches);
+	printf("timeDtD = %f\n", HeTM_stats_data.timeDtD);
 
   return EXIT_SUCCESS;
 }

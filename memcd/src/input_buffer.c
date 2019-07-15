@@ -286,7 +286,7 @@ void GPUbuffer_ZIPF_2()
 
   // 1st item is generated 10% of the times
   unsigned maxGen = parsedData.CONFL_SPACE * parsedData.num_ways;
-  zipf_setup(maxGen, 0.8);
+  zipf_setup(maxGen, 0.5);
 
 	memman_select("GPU_input_buffer_good");
 	int *cpu_ptr = (int*)memman_get_cpu(NULL);
@@ -306,10 +306,10 @@ void GPUbuffer_ZIPF_2()
   // done = 0;
 	for (int i = 0; i < buffer_last; ++i) {
     zipfRnd = zipf_gen();
-		cpu_ptr[i] = i % 100;// maxGen - zipfRnd;
-    // rnd = ((zipfRnd / parsedData.CONFL_SPACE) * 2 + 1) * parsedData.CONFL_SPACE
-    //   + (zipfRnd % parsedData.CONFL_SPACE);
-		// cpu_ptr[i] = rnd;
+		// cpu_ptr[i] = i % 100;// maxGen - zipfRnd;
+    rnd = ((zipfRnd / parsedData.CONFL_SPACE) * 2 + 1) * parsedData.CONFL_SPACE
+      + (zipfRnd % parsedData.CONFL_SPACE);
+		cpu_ptr[i] = rnd;
 	}
 }
 
@@ -321,7 +321,7 @@ void CPUbuffer_ZIPF_2()
   unsigned maxGen = parsedData.CONFL_SPACE * parsedData.num_ways;
 
   // 1st item is generated 10% of the times
-  zipf_setup(maxGen, 0.8);
+  zipf_setup(maxGen, 0.5);
 
   unsigned rnd, zipfRnd;
   for (int i = 0; i < good_buffers_last; ++i) {
@@ -333,9 +333,9 @@ void CPUbuffer_ZIPF_2()
   // done = 0;
   for (int i = good_buffers_last; i < bad_buffers_last; ++i) {
     zipfRnd = zipf_gen();
-    CPUInputBuffer[i] = i % 100; //maxGen - zipfRnd;
-    // rnd = ((zipfRnd / parsedData.CONFL_SPACE) * 2) * parsedData.CONFL_SPACE
-    //   + (zipfRnd % parsedData.CONFL_SPACE);
-    // CPUInputBuffer[i] = rnd; // gets input from the GPU //2*i;//
+    // CPUInputBuffer[i] = i % 100; //maxGen - zipfRnd;
+    rnd = ((zipfRnd / parsedData.CONFL_SPACE) * 2) * parsedData.CONFL_SPACE
+      + (zipfRnd % parsedData.CONFL_SPACE);
+    CPUInputBuffer[i] = rnd; // gets input from the GPU //2*i;//
   }
 }

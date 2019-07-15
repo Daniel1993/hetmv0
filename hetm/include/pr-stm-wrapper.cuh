@@ -183,10 +183,14 @@
 //
 #endif
 
+#ifndef HETM_REDUCED_RS
+#define HETM_REDUCED_RS 0
+#endif /* HETM_REDUCED_RS */
+
 #define SET_ON_LOG(addr) \
 	uintptr_t _rsetAddr = (uintptr_t)(addr); \
 	uintptr_t _devBAddr = (uintptr_t)GPU_log->devMemPoolBasePtr; \
-	uintptr_t _pos = (_rsetAddr - _devBAddr) >> PR_LOCK_GRAN_BITS; \
+	uintptr_t _pos = (_rsetAddr - _devBAddr) >> (PR_LOCK_GRAN_BITS+HETM_REDUCED_RS); \
 	SET_ON_BMAP \
 //
 #else
@@ -205,6 +209,28 @@
 // TODO: instrumentation in the GPU is reduced via "isGPUOnly" flag, which
 // also afects the copies (copy all)
 
+#ifdef HETM_DISABLE_RS
+#define PR_AFTER_VAL_LOCKS_GATHER_READ_SET(i) /* empty */
+#else /* !HETM_DISABLE_RS */
+#define PR_AFTER_VAL_LOCKS_GATHER_READ_SET(i) \
+	for (i = 0; i < args->rset.size; i++) { \
+		SET_ON_LOG(args->rset.addrs[i]); \
+	} \
+//
+#endif /* HETM_DISABLE_RS */
+
+#ifdef HETM_DISABLE_WS
+#define PR_AFTER_VAL_LOCKS_GATHER_WRITE_SET(i) /* empty */
+#else /* !HETM_DISABLE_WS	 */
+#define PR_AFTER_VAL_LOCKS_GATHER_WRITE_SET(i) \
+	for (i = 0; i < args->wset.size; i++) { \
+		/* this is avoided through a memcpy D->D after batch */ \
+		memman_access_addr_dev(GPU_log->bmap, args->wset.addrs[i], GPU_log->batchCount); \
+		SET_ON_LOG(args->rset.addrs[i]); \
+	} \
+//
+#endif /* HETM_DISABLE_WS */
+
 #define PR_AFTER_VAL_LOCKS_EXT(args) ({ \
   int i; \
 	HeTM_GPU_log_s *GPU_log = (HeTM_GPU_log_s*)args->pr_args_ext; \
@@ -213,14 +239,8 @@
 		HeTM_GPU_log_explicit_before_reads \
 		/* ---------------------- */ \
 		/* add read to devLogR */ \
-		for (i = 0; i < args->rset.size; i++) { \
-			SET_ON_LOG(args->rset.addrs[i]); \
-		} \
-		for (i = 0; i < args->wset.size; i++) { \
-			/* this is avoided through a memcpy D->D after batch */ \
-			/*memman_access_addr_dev(GPU_log->bmapBackup, args->wset.addrs[i], 1);*/ \
-			memman_access_addr_dev(GPU_log->bmap, args->wset.addrs[i], GPU_log->batchCount); \
-		} \
+		PR_AFTER_VAL_LOCKS_GATHER_READ_SET(i); \
+		PR_AFTER_VAL_LOCKS_GATHER_WRITE_SET(i); \
 		/* TODO: explicit logOnly */ \
 		HeTM_GPU_log_explicit_after_reads /* offset of the next transaction */ \
 		/* ---------------------- */ \

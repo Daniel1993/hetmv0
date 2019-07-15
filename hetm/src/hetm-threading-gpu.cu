@@ -106,11 +106,25 @@ void HeTM_gpu_thread()
 loop_gpu_batch:
 
     if (isOverlappingKernel /* && HeTM_shared_data.isCPUEnabled == 1 */) {
-      if (isInterConflt) {
-        notifyCPUNextBatch(); // do not wait the D->D copy
-      }
+      ///---
+      // if (isInterConflt) {
+      //   notifyCPUNextBatch(); // do not wait the D->D copy
+      // }
+      ///---
+
       // backups the dataset
       size_t datasetCpySize = 0;
+      if (HeTM_stats_data.timeDtD == 0) {
+        HeTM_stats_data.timeDtD += 1e-200;
+      } else {
+        float elapsedTime;
+        CUDA_EVENT_SYNCHRONIZE(HeTM_thread_data->cpyWSetStartEvent);
+        CUDA_EVENT_SYNCHRONIZE(HeTM_thread_data->cpyWSetStopEvent);
+        CUDA_EVENT_ELAPSED_TIME(&elapsedTime, HeTM_thread_data->cpyWSetStartEvent,
+          HeTM_thread_data->cpyWSetStopEvent);
+        HeTM_stats_data.timeDtD += elapsedTime;
+      }
+      CUDA_EVENT_RECORD(HeTM_thread_data->cpyWSetStartEvent, (cudaStream_t)HeTM_memStream);
       if (isInterConflt) {
         // recovers the main (D->H done with the shadow copy)
         HeTM_mempool_cpy_to_gpu_main(&datasetCpySize, afterBatch_batchCount);
@@ -118,7 +132,9 @@ loop_gpu_batch:
         // overides the main
         HeTM_mempool_cpy_to_gpu_backup(&datasetCpySize, afterBatch_batchCount);
       }
-      HeTM_stats_data.sizeCpyDataset += datasetCpySize;
+      CUDA_EVENT_RECORD(HeTM_thread_data->cpyWSetStopEvent, (cudaStream_t)HeTM_memStream);
+      // TODO: does not count the D->D copy
+      // HeTM_stats_data.sizeCpyDataset += datasetCpySize;
     }
 
     prepareSyncDataset();
@@ -130,7 +146,10 @@ loop_gpu_batch:
     runBeforeKernel(threadId, (void*)HeTM_thread_data);
     cudaStreamSynchronize((cudaStream_t)HeTM_memStream); // waits D->D cpy
     runBatch(); // only the first kernel is not an overlapping kernel
+
+    // ------------------------------------------------------------------------
     HeTM_reset_inter_confl_flag(); // TODO: where to reset this
+    // ------------------------------------------------------------------------
 
     if (isOverlappingKernel) {
       // the next kernel must overlap with the copy of data
@@ -145,17 +164,21 @@ loop_gpu_batch:
       // TODO: GPU kernels are NOT overlaping with the copy
       // WAIT_ON_FLAG(isDatasetSyncDone);
 
-      if (!isInterConflt) { // from previous batch
-        while (!isDatasetSyncDone) {
-          // wait previous kernel and launch another one
-          waitBatchEnd();
-          runAfterKernel(threadId, (void*)HeTM_thread_data);
-          runBeforeKernel(threadId, (void*)HeTM_thread_data);
-          runBatch();
-        }
+      while (!isDatasetSyncDone) {
+        // wait previous kernel and launch another one
+        waitBatchEnd();
+        runAfterKernel(threadId, (void*)HeTM_thread_data);
+        runBeforeKernel(threadId, (void*)HeTM_thread_data);
+        runBatch();
+      }
+      ///---
+      // if (!isInterConflt) { // from previous batch
+      ///---
         isDatasetSyncDone = 0;
         notifyCPUNextBatch();
-      }
+      ///---
+      // }
+      ///---
       TIMER_READ(t3);
       HeTM_stats_data.timeAfterCMP += TIMER_DIFF_SECONDS(t2, t3);
     }
@@ -178,15 +201,20 @@ loop_gpu_batch:
         TIMER_READ(t2);
       } while(TIMER_DIFF_SECONDS(t1woCpy, t2) < HeTM_shared_data.timeBudget && !isInterConflt);
     }
+    if (isInterConflt) HeTM_stats_data.nbEarlyValAborts++;
     afterWaitBatchEnd();
     // isOtherKernelStarted = 0;
     // printf("after last runBatch --> %f s\n", HeTM_shared_data.timeBudget);
 
     TIMER_READ(t2);
-    HeTM_stats_data.timePRSTM += TIMER_DIFF_SECONDS(t1, t2);
+    double timeLastBatch = TIMER_DIFF_SECONDS(t1, t2);
+    HeTM_stats_data.timePRSTM += timeLastBatch;
 
     waitCMPEnd();
     isInterConflt = HeTM_is_interconflict();
+    if (isInterConflt) {
+      HeTM_stats_data.timeAbortedBatches += timeLastBatch;
+    }
     TIMER_READ(t1);
     HeTM_stats_data.timeCMP += TIMER_DIFF_SECONDS(t2, t1);
 
@@ -216,6 +244,8 @@ loop_gpu_batch:
     RUN_ASYNC(offloadWaitDataset, HeTM_thread_data);
     WAIT_ON_FLAG(isDatasetSyncDone);
   }
+
+  cudaDeviceSynchronize(); // before terminating the benchmark
 
   notifyCPUNextBatch();
   TIMER_READ(t3);
@@ -281,13 +311,18 @@ loop_gpu_batch:
         // printf("Time in seconds = %f s\n", TIMER_DIFF_SECONDS(t1, t2));
       } while(TIMER_DIFF_SECONDS(t1, t2) < HeTM_shared_data.timeBudget && !isInterConflt);
     }
+    if (isInterConflt) HeTM_stats_data.nbEarlyValAborts++;
     afterWaitBatchEnd();
     TIMER_READ(t2);
     // TODO: I'm taking GPU time in PR-STM
-    HeTM_stats_data.timePRSTM += TIMER_DIFF_SECONDS(t1, t2);
+    double timeLastBatch = TIMER_DIFF_SECONDS(t1, t2);
+    HeTM_stats_data.timePRSTM += timeLastBatch;
 
     waitCMPEnd();
     isInterConflt = HeTM_is_interconflict();
+    if (isInterConflt) {
+      HeTM_stats_data.timeAbortedBatches += timeLastBatch;
+    }
     TIMER_READ(t3);
      // TODO: let the next batch begin if dataset is still not copied
 
@@ -319,6 +354,9 @@ loop_gpu_batch:
     notifyCPUNextBatch();
     goto loop_gpu_batch;
   }
+
+  cudaDeviceSynchronize(); // before terminating the benchmark
+
   notifyCPUNextBatch();
 
   // TODO: this was per iteration
@@ -630,16 +668,19 @@ static void offloadSyncDatasetAfterBatch(void *args)
 
   // tmp_threadData = threadData;
 
-#if HETM_CMP_TYPE == HETM_CMP_DISABLED
+#if HETM_CMP_TYPE == HETM_CMP_DISABLED || defined (HETM_DISABLE_WS)
   // if (HeTM_shared_data.isCPUEnabled == 0) {
-#ifndef USE_UNIF_MEM
     // HeTM_mempool_cpy_to_cpu(&datasetCpySize);
     memman_select("HeTM_mempool");
     void *host = memman_get_cpu(&datasetCpySize);
     void *dev = memman_get_gpu(NULL);
+#ifdef HETM_OVERLAP_CPY_BACK
+    cudaMemcpyAsync(host, dev, datasetCpySize, cudaMemcpyDeviceToHost, (cudaStream_t)HeTM_memStream);
+#else
+    // sync
     cudaMemcpy(host, dev, datasetCpySize, cudaMemcpyDeviceToHost);
+#endif
     HeTM_stats_data.sizeCpyDataset += datasetCpySize;
-#endif /* USE_UNIF_MEM */
     return;
   // }
 #endif /* HETM_CMP_TYPE == HETM_CMP_DISABLED */
@@ -656,6 +697,22 @@ static void offloadSyncDatasetAfterBatch(void *args)
     HeTM_stats_data.sizeCpyDataset += datasetCpySize;
 
     CUDA_EVENT_RECORD(threadData->cpyDatasetStopEvent, (cudaStream_t)HeTM_memStream);
+#ifndef HETM_OVERLAP_CPY_BACK // The overlap does this before launching the next batch
+    if (HeTM_shared_data.isCPUEnabled == 1) {
+      if (HeTM_stats_data.timeDtD == 0) {
+        HeTM_stats_data.timeDtD += 1e-200;
+      } else {
+        float elapsedTime;
+        CUDA_EVENT_SYNCHRONIZE(threadData->cpyWSetStartEvent);
+        CUDA_EVENT_SYNCHRONIZE(threadData->cpyWSetStopEvent);
+        CUDA_EVENT_ELAPSED_TIME(&elapsedTime, threadData->cpyWSetStartEvent, threadData->cpyWSetStopEvent);
+        HeTM_stats_data.timeDtD += elapsedTime;
+      }
+      CUDA_EVENT_RECORD(threadData->cpyWSetStartEvent, (cudaStream_t)HeTM_memStream);
+      HeTM_mempool_cpy_to_gpu_backup(&datasetCpySize, afterBatch_batchCount);
+      CUDA_EVENT_RECORD(threadData->cpyWSetStopEvent, (cudaStream_t)HeTM_memStream);
+    }
+#endif /* HETM_OVERLAP_CPY_BACK */
 
   } else { // conflict detected
 
@@ -665,10 +722,22 @@ static void offloadSyncDatasetAfterBatch(void *args)
       // Drop GPU policy
       // overide the main with the backup
       if (HeTM_shared_data.isCPUEnabled == 1) {
+        if (HeTM_stats_data.timeDtD == 0) {
+          HeTM_stats_data.timeDtD += 1e-200;
+        } else {
+          float elapsedTime;
+          CUDA_EVENT_SYNCHRONIZE(threadData->cpyWSetStartEvent);
+          CUDA_EVENT_SYNCHRONIZE(threadData->cpyWSetStopEvent);
+          CUDA_EVENT_ELAPSED_TIME(&elapsedTime, threadData->cpyWSetStartEvent, threadData->cpyWSetStopEvent);
+          HeTM_stats_data.timeDtD += elapsedTime;
+        }
         // backups
+        CUDA_EVENT_RECORD(threadData->cpyWSetStartEvent, (cudaStream_t)HeTM_memStream);
         HeTM_mempool_cpy_to_gpu_main(&datasetCpySize, afterBatch_batchCount);
+        CUDA_EVENT_RECORD(threadData->cpyWSetStopEvent, (cudaStream_t)HeTM_memStream);
       }
-      HeTM_stats_data.sizeCpyDataset += datasetCpySize;
+      // TODO: does not count the D->D copy
+      // HeTM_stats_data.sizeCpyDataset += datasetCpySize;
 #endif /* HETM_OVERLAP_CPY_BACK */
     }
 

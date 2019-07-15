@@ -186,7 +186,7 @@ void bank_parseArgs(int argc, char **argv, thread_data_t *data)
         data->access_controller = atof(optarg);
         break;
       case 'l':
-        data->prec_write_txs = atoi(optarg);
+        data->prec_write_txs = atof(optarg);
         data->num_ways = atoi(optarg);
         break;
       case 'T':
@@ -412,7 +412,7 @@ void bank_statsFile(thread_data_t *data)
         "CPU_PART(6);"
         "GPU_PART(7);"
         "P_INTERSECT(8);"
-      	"BMAP_WSETDATA(9);"
+      	"TIME_ABORTED(9);"
       	"REAL_DURATION(10);"
       	"NB_CPU_COMMITS(11);"
       	"NB_GPU_COMMITS(12);"
@@ -428,7 +428,7 @@ void bank_statsFile(thread_data_t *data)
         "TIME_BATCH(22);"
         "TIME_AFTER_BATCH(23);"
         "TIME_AFTER_CMP(24);"
-      	"TIME_CPY_WSET(25);"
+      	"TIME_CPY_DtD(25);"
       	"TIME_CMP(26);"
       	"TIME_CPY_DATASET(27);"
       	"THROUGHPUT_BETWEEN_BATCHES(28);"
@@ -439,7 +439,7 @@ void bank_statsFile(thread_data_t *data)
         "SIZE_CPY_WSET(33);"
         "SIZE_CPY_DATASET(34);"
         "TIME_BMAP_MEMCPY(35);"
-        "SIZE_HOTSPOT(36)"
+        "NB_EARLY_VAL(36)"
         "\n"
       );
     }
@@ -461,7 +461,7 @@ void bank_statsFile(thread_data_t *data)
     fprintf(f, "%f;" , CPU_PART                              ); // CPU_PART(6)
     fprintf(f, "%f;" , GPU_PART                              ); // GPU_PART(7)
     fprintf(f, "%f;" , P_INTERSECT                           ); // P_INTERSECT(8)
-    fprintf(f, "%lu;" , HeTM_stats_data.sizeCpyWSetCPUData   ); // BMAP_WSETDATA(9)
+    fprintf(f, "%f;" , HeTM_stats_data.timeAbortedBatches    ); // TIME_ABORTED(9)
     fprintf(f, "%f;" , data->tot_duration2[data->iter/2]     ); // REAL_DURATION(10)
     fprintf(f, "%lu;", data->tot_commits[data->iter/2]       ); // NB_CPU_COMMITS(11)
     fprintf(f, "%lu;", data->tot_commits_gpu[data->iter/2]   ); // NB_GPU_COMMITS(12)
@@ -477,7 +477,7 @@ void bank_statsFile(thread_data_t *data)
     fprintf(f, "%f;" , HeTM_stats_data.timePRSTM             ); // TIME_BATCH(22)
     fprintf(f, "%f;" , HeTM_stats_data.timeCMP               ); // TIME_AFTER_BATCH(23)
     fprintf(f, "%f;" , HeTM_stats_data.timeAfterCMP          ); // TIME_AFTER_CMP(24)
-    fprintf(f, "%f;" , HeTM_stats_data.totalTimeCpyWSet/1000.0); // TIME_CPY_WSET(25)
+    fprintf(f, "%f;" , HeTM_stats_data.timeDtD               ); // TIME_CPY_DtD(25) in ms
     fprintf(f, "%f;" , HeTM_stats_data.totalTimeCmp/1000.0   ); // TIME_CMP(26)
     fprintf(f, "%f;" , HeTM_stats_data.totalTimeCpyDataset/1000.0); // TIME_CPY_DATASET(27)
     fprintf(f, "%f;" , throughputBetweenBatches              ); // THROUGHPUT_BETWEEN_BATCHES(28)
@@ -488,7 +488,7 @@ void bank_statsFile(thread_data_t *data)
     fprintf(f, "%zu;", HeTM_stats_data.sizeCpyWSet           ); // SIZE_CPY_WSET(33)
     fprintf(f, "%zu;", HeTM_stats_data.sizeCpyDataset        ); // SIZE_CPY_DATASET(34)
     fprintf(f, "%f;" , HeTM_stats_data.timeMemCpySum         ); // TIME_BMAP_MEMCPY(35)
-    fprintf(f, "%f"  , data->hmult                           ); // SIZE_HOTSPOT(36)
+    fprintf(f, "%li" , HeTM_stats_data.nbEarlyValAborts      ); // NB_EARLY_VAL(36)
     fprintf(f, "\n");
     fclose(f);
 }
