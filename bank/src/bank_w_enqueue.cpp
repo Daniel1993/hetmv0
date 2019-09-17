@@ -12,11 +12,32 @@
 #include "input_handler.h"
 #include "rdtsc.h"
 
+#include "tbb/concurrent_queue.h"
+
+typedef struct enqueue_req_ {
+	int isReadIntensive;
+	int isReadTX;
+	volatile unsigned accounts_vec[128];
+	int isInterConflict;
+	int nbAccesses;
+	int nbAccounts;
+} enqueue_req_t;
+
+// TODO: test with multiple disjoint queues
+tbb::concurrent_queue<enqueue_req_t*> sharedConcQueue;
+
 /* ################################################################### *
 * GLOBALS
 * ################################################################### */
 
 // global
+
+// TODO: memory pool for requests
+static int flagEnqueuerToExit = 0;
+static enqueue_req_t *requests; // memory pool for the requests
+static const int MAX_REQUESTS = 0xFFFF;
+static int request_index = 0;
+
 thread_data_t parsedData;
 int isInterBatch = 0;
 
@@ -598,8 +619,118 @@ static void reset(bank_t *bank)
 * TRANSACTION THREADS
 * ################################################################### */
 
+static void* test_enqueuer(void *data)
+{
+	int id;
+	enqueue_req_t  *req;
+	thread_data_t    *d = (thread_data_t *)data;
+	cuda_t          *cd = d->cd;
+	account_t *accounts = d->bank->accounts;
+	int nb_accounts = d->bank->size;
+	int rndOpt = RAND_R_FNC(d->seed);
+	int rndOpt2 = RAND_R_FNC(d->seed);
+	int curr_tx = 0;
+	volatile int resReadOnly = 0;
+	volatile unsigned seed = 0x213FAB;
+
+	while (!flagEnqueuerToExit) { // TODO: EXIT condition
+
+		// req = (enqueue_req_t*)malloc(sizeof(enqueue_req_t));
+		req = &requests[request_index];
+		request_index = (request_index + 1) % MAX_REQUESTS;
+
+		int good_buffers_start = 0;
+		int bad_buffers_start = size_of_CPU_input_buffer/sizeof(int) * NB_OF_BUFFERS;
+		int buffers_start = isInterBatch ? bad_buffers_start : good_buffers_start;
+
+		int index = buffers_start+id*NB_CPU_TXS_PER_THREAD + curr_tx;
+		req->accounts_vec[0] = CPUInputBuffer[index];
+
+		// if (accounts_vec[0] == 0) {
+		// 	printf("conflict access stm_baseMemPool=%p accounts=%p\n", stm_baseMemPool, accounts);
+		// }
+
+	#if BANK_PART == 3
+		static thread_local unsigned offset = 4096 * (id*1000);
+		offset += (4096 % nb_accounts) & ~0xFFF;
+		req->accounts_vec[0] = accounts_vec[0] % 4096;
+		req->accounts_vec[0] += offset;
+		req->accounts_vec[0] %= (nb_accounts - 40);
+		req->accounts_vec[0] |= 1;
+	#endif /* BANK_PART == 3 */
+
+		if (rndOpt % 100 < d->nb_read_intensive) {
+			/* ** READ_INTENSIVE BRANCH (-R >0) ** */
+			req->isReadIntensive = 1;
+			// BANK_PREPARE_READ_INTENSIVE(d->id, d->seed, rnd, d->hmult, d->nb_threads, accounts_vec, nb_accounts);
+			// TODO: change the buffers
+			for (int i = 1; i < d->read_intensive_size; ++i) {
+				req->accounts_vec[i] = req->accounts_vec[i-1]+1;
+			}
+
+			if (rndOpt2 % 100000000 < (d->prec_write_txs * 1000000)) {
+				// 1% readIntensive
+				req->isReadTX = 1;
+				req->nbAccesses = d->read_intensive_size;
+			} else {
+				req->isReadTX = 0;
+				req->nbAccesses = d->read_intensive_size;
+			}
+		} else {
+			/* ** (current in use with -R 0) ** */
+			req->isReadIntensive = 0;
+			// BANK_PREPARE_TRANSFER(d->id, d->seed, rnd, d->hmult, d->nb_threads, accounts_vec, nb_accounts);
+			for (int i = 1; i < d->read_intensive_size; ++i) {
+				req->accounts_vec[i] = req->accounts_vec[i-1]+1;
+			}
+			// for (int i = 1; i < d->trfs*2; ++i)
+			// 	accounts_vec[i] = accounts_vec[i-1] + parsedData.access_offset;
+	#if BANK_PART == 5
+			// first transactions are write
+			// printf("NB_CPU_TXS_PER_THREAD - curr_tx = %i   (float)d->prec_write_txs*0.01f*(float)NB_CPU_TXS_PER_THREAD = %f\n",
+			// 	NB_CPU_TXS_PER_THREAD - curr_tx, (float)d->prec_write_txs*0.01f*(float)NB_CPU_TXS_PER_THREAD);
+
+			if ((NB_CPU_TXS_PER_THREAD - curr_tx) <= (float)d->prec_write_txs*0.01f*(float)NB_CPU_TXS_PER_THREAD) {
+				req->isReadTX = 0;
+				req->nbAccesses = d->read_intensive_size;
+			} else {
+				req->isReadTX = 1;
+				req->nbAccesses = d->read_intensive_size;
+			}
+
+	#elif BANK_PART == 9 || BANK_PART == 10
+			if (rndOpt2 % 100000000 < (d->prec_write_txs * 1000000)) {
+				req->isReadTX = 0;
+				req->nbAccesses = d->read_intensive_size;
+				req->nbAccounts = nb_accounts;
+				req->isInterConflict = isInterBatch;
+			} else {
+				req->isReadTX = 1;
+				req->nbAccesses = d->read_intensive_size;
+				req->nbAccounts = nb_accounts;
+				req->isInterConflict = isInterBatch;
+				// resReadOnly += transferReadOnly(d->bank->accounts, accounts_vec, d->trfs, 1);
+			}
+	#else /* BANK_PART == 5 */
+			if (rndOpt2 % 100000000 < (d->prec_write_txs * 1000000)) {
+				req->isReadTX = 0;
+				req->nbAccesses = d->read_intensive_size;
+			} else {
+				req->isReadTX = 1;
+				req->nbAccesses = d->read_intensive_size;
+			}
+	#endif /* BANK_PART == 5 */
+		}
+		sharedConcQueue.push(req);
+		curr_tx += 1;
+		id = (id + 1) % d->nb_threadsCPU;
+	}
+	return NULL;
+}
+
 static void test(int id, void *data)
 {
+	enqueue_req_t  *req;
   thread_data_t    *d = &((thread_data_t *)data)[id];
   cuda_t          *cd = d->cd;
   account_t *accounts = d->bank->accounts;
@@ -618,66 +749,37 @@ static void test(int id, void *data)
 	int index = buffers_start+id*NB_CPU_TXS_PER_THREAD + curr_tx;
 	accounts_vec[0] = CPUInputBuffer[index];
 
-	// if (accounts_vec[0] == 0) {
-	// 	printf("conflict access stm_baseMemPool=%p accounts=%p\n", stm_baseMemPool, accounts);
-	// }
+	while (!sharedConcQueue.try_pop(req)) /* wait */; // TODO: the other thread spams mallocs....
 
-#if BANK_PART == 3
-	static thread_local unsigned offset = 4096 * (id*1000);
-	offset += (4096 % nb_accounts) & ~0xFFF;
-	accounts_vec[0] = accounts_vec[0] % 4096;
-	accounts_vec[0] += offset;
-	accounts_vec[0] %= (nb_accounts - 40);
-	accounts_vec[0] |= 1;
-#endif /* BANK_PART == 3 */
-
-	if (rndOpt % 100 < d->nb_read_intensive) {
-		/* ** READ_INTENSIVE BRANCH (-R > 0) ** */
-		// BANK_PREPARE_READ_INTENSIVE(d->id, d->seed, rnd, d->hmult, d->nb_threads, accounts_vec, nb_accounts);
-		// TODO: change the buffers
-		for (int i = 1; i < d->read_intensive_size; ++i) {
-			accounts_vec[i] = accounts_vec[i-1]+1;
-		}
-
-		if (rndOpt2 % 100000000 < (d->prec_write_txs * 1000000)) {
+	if (req->isReadIntensive) {
+		/* ** READ_INTENSIVE BRANCH (-R >0) ** */
+		if (req->isReadTX) {
 			// 1% readIntensive
-			readIntensive(d->bank->accounts, accounts_vec, d->read_intensive_size, 1);
+			readIntensive(d->bank->accounts, req->accounts_vec, req->nbAccesses, 1);
 		} else {
-			resReadOnly += readOnly(d->bank->accounts, accounts_vec, d->read_intensive_size, 1);
+			resReadOnly += readOnly(d->bank->accounts, req->accounts_vec, req->nbAccesses, 1);
 		}
 	} else {
-		/* ** READ_INTENSIVE BRANCH (current in use with -R 0) ** */
-		// BANK_PREPARE_TRANSFER(d->id, d->seed, rnd, d->hmult, d->nb_threads, accounts_vec, nb_accounts);
-		for (int i = 1; i < d->read_intensive_size; ++i) {
-			accounts_vec[i] = accounts_vec[i-1]+1;
-		}
-		// for (int i = 1; i < d->trfs*2; ++i)
-		// 	accounts_vec[i] = accounts_vec[i-1] + parsedData.access_offset;
+		/* ** current in use with -R 0 ** */
 #if BANK_PART == 5
-		// first transactions are write
-		// printf("NB_CPU_TXS_PER_THREAD - curr_tx = %i   (float)d->prec_write_txs*0.01f*(float)NB_CPU_TXS_PER_THREAD = %f\n",
-		// 	NB_CPU_TXS_PER_THREAD - curr_tx, (float)d->prec_write_txs*0.01f*(float)NB_CPU_TXS_PER_THREAD);
-
-		if ((NB_CPU_TXS_PER_THREAD - curr_tx) <= (float)d->prec_write_txs*0.01f*(float)NB_CPU_TXS_PER_THREAD) {
-			transfer(d->bank->accounts, accounts_vec, d->read_intensive_size, 1);
+		if (!req->isReadTX) {
+			transfer(d->bank->accounts, req->accounts_vec, req->nbAccesses, 1);
 		} else {
-			// resReadOnly += transferReadOnly(d->bank->accounts, accounts_vec, d->trfs, 1);
-			resReadOnly += readOnly(d->bank->accounts, accounts_vec, d->read_intensive_size, 1);
+			resReadOnly += readOnly(d->bank->accounts, req->accounts_vec, req->nbAccesses, 1);
 		}
 
 #elif BANK_PART == 9 || BANK_PART == 10
-		if (rndOpt2 % 100000000 < (d->prec_write_txs * 1000000)) {
-			transfer2(d->bank->accounts, accounts_vec, isInterBatch, d->read_intensive_size, id, nb_accounts);
+		if (!req->isReadTX) {
+			transfer2(d->bank->accounts, req->accounts_vec, req->isInterConflict, d->read_intensive_size, id, req->nbAccounts);
 		} else {
 			// resReadOnly += transferReadOnly(d->bank->accounts, accounts_vec, d->trfs, 1);
-			resReadOnly += readOnly2(d->bank->accounts, accounts_vec, isInterBatch, d->read_intensive_size, id, nb_accounts);
+			resReadOnly += readOnly2(d->bank->accounts, req->accounts_vec, req->isInterConflict, req->nbAccesses, id, req->nbAccounts);
 		}
 #else /* BANK_PART == 5 */
-		if (rndOpt2 % 100000000 < (d->prec_write_txs * 1000000)) {
-			transfer(d->bank->accounts, accounts_vec, d->read_intensive_size, 1);
+		if (!req->isReadTX) {
+			transfer(d->bank->accounts, req->accounts_vec, req->nbAccesses, 1);
 		} else {
-			// resReadOnly += transferReadOnly(d->bank->accounts, accounts_vec, d->trfs, 1);
-			resReadOnly += readOnly(d->bank->accounts, accounts_vec, d->read_intensive_size, 1);
+			resReadOnly += readOnly(d->bank->accounts, req->accounts_vec, req->nbAccesses, 1);
 		}
 #endif /* BANK_PART == 5 */
 	}
@@ -690,6 +792,8 @@ static void test(int id, void *data)
 	while ((rdtsc() - tsc) < parsedData.CPU_backoff);
 
 	// asm volatile ("" ::: "memory");
+
+	// free(req); // not needed because it is taken from the pool
 
   d->nb_transfer++;
   d->global_commits++;
@@ -760,39 +864,7 @@ static void after_batch(int id, void *data)
 	// TODO: conflict mechanism
 }
 
-static void choose_policy(int, void*) {
-  // -----------------------------------------------------------------------
-  // int idGPUThread = HeTM_shared_data.nbCPUThreads;
-  // long TXsOnCPU = 0;
-	// long TXsOnGPU = parsedData.GPUthreadNum*parsedData.GPUblockNum*parsedData.trans;
-  // for (int i = 0; i < HeTM_shared_data.nbCPUThreads; ++i) {
-  //   TXsOnCPU += HeTM_shared_data.threadsInfo[i].curNbTxs;
-  // }
-
-  // TODO: this picks the one with higher number of TXs
-	// TODO: GPU only gets the stats in the end --> need to remove the dropped TXs
-// #if BANK_PART != 7 && BANK_PART != 8
-// 	HeTM_stats_data.nbTxsGPU += TXsOnGPU;
-//
-// 	if (HeTM_shared_data.policy == HETM_GPU_INV) {
-// 		if (HeTM_is_interconflict()) {
-// 			HeTM_stats_data.nbDroppedTxsGPU += TXsOnGPU;
-// 		} else {
-// 			HeTM_stats_data.nbCommittedTxsGPU += TXsOnGPU;
-// 		}
-// 	} else if (HeTM_shared_data.policy == HETM_CPU_INV) {
-// 		HeTM_stats_data.nbCommittedTxsGPU += TXsOnGPU;
-// 	}
-// #endif /* BANK_PART != 7 */
-
-	// can only choose the policy for the next round
-  // if (TXsOnCPU > TXsOnGPU) {
-  //   HeTM_shared_data.policy = HETM_GPU_INV;
-  // } else {
-  //   HeTM_shared_data.policy = HETM_CPU_INV;
-  // }
-  // -----------------------------------------------------------------------
-}
+static void choose_policy(int, void*) { /* TODO: drop policy */ }
 
 static void test_cuda(int id, void *data)
 {
@@ -800,13 +872,6 @@ static void test_cuda(int id, void *data)
   cuda_t          *cd = d->cd;
   account_t *accounts = d->bank->accounts;
   size_t bank_size = d->bank->size;
-
-// #if HETM_CPU_EN == 0
-// 	// with GPU only, CPU samples some data between batches
-// 	for (int i = 0; i < bank_size; ++i) {
-// 		bank_cpu_sample_data += accounts[i];
-// 	}
-// #endif /* HETM_CPU_EN == 0 */
 
 #if BANK_PART == 7 || BANK_PART == 8
 	// makes the batch artificially longer
@@ -822,31 +887,11 @@ static void test_cuda(int id, void *data)
 
 	int idGPUThread = HeTM_shared_data.nbCPUThreads;
 	long TXsOnGPU = parsedData.GPUthreadNum*parsedData.GPUblockNum*parsedData.trans;
-
-// #if BANK_PART != 7 && BANK_PART != 8
-// 	HeTM_stats_data.nbTxsGPU += TXsOnGPU;
-//
-// 	if (HeTM_shared_data.policy == HETM_GPU_INV) {
-// 		if (HeTM_is_interconflict()) {
-// 			HeTM_stats_data.nbDroppedTxsGPU += TXsOnGPU;
-// 		} else {
-// 			HeTM_stats_data.nbCommittedTxsGPU += TXsOnGPU;
-// 		}
-// 	} else if (HeTM_shared_data.policy == HETM_CPU_INV) {
-// 		HeTM_stats_data.nbCommittedTxsGPU += TXsOnGPU;
-// 	}
-// #endif /* BANK_PART != 7 */
 }
 
 static void afterGPU(int id, void *data)
 {
   thread_data_t *d = &((thread_data_t *)data)[id];
-
-  // int ret = bank_sum(d->bank);
-  // if (ret != 0) {
-    // this gets CPU transactions running
-    // printf("error at batch %i, expect %i but got %i\n", HeTM_stats_data.nbBatches, 0, ret);
-  // }
 
   d->nb_transfer               = HeTM_stats_data.nbCommittedTxsGPU;
   d->nb_transfer_gpu_only      = HeTM_stats_data.nbTxsGPU;
@@ -996,6 +1041,14 @@ int main(int argc, char **argv)
   // ###########################################################################
   // ### Start iterations ######################################################
   // ###########################################################################
+	
+	pthread_t enqueuer;
+	// TODO: memory pool
+	requests = (enqueue_req_t *)malloc(sizeof(enqueue_req_t)*MAX_REQUESTS);
+	if (pthread_create(&enqueuer, NULL, test_enqueuer, &parsedData)) {
+		perror("launch enqueuer thread");
+	}
+
   for(j = 0; j < parsedData.iter; j++) { // Loop for testing purposes
     //Clear flags
     HeTM_set_is_stop(0);
@@ -1077,6 +1130,10 @@ int main(int argc, char **argv)
 
   free(threads);
   free(data);
+
+	__atomic_store_n(&flagEnqueuerToExit, 1, __ATOMIC_RELEASE);
+	pthread_join(enqueuer, NULL);
+	free(requests);
 
   return EXIT_SUCCESS;
 }

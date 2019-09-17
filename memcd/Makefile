@@ -1,17 +1,18 @@
 ### TODO: create include files for pr-stm, cuda-utils, tsx and tiny
 
 CURR_DIR      ?= ~/projs/HeTM_V0/memcd
+
 TINY_ROOT     ?= $(CURR_DIR)/../tinyMOD
 TSX_ROOT      ?= $(CURR_DIR)/../tsxMOD
 HETM_ROOT     ?= $(CURR_DIR)/../hetm
-HTM_SGL       ?= ~/projs/htm_alg
-PR_STM_DIR    ?= ~/projs/pr-stm
 CUDA_PATH     ?= /usr/local/cuda
-SHARED        ?= ~/projs/HeTM_V0/shared_bench
-INPUT_HANDLER ?= ~/projs/HeTM_V0/shared
+SHARED        ?= $(CURR_DIR)/../shared_bench
+INPUT_HANDLER ?= $(CURR_DIR)/../shared
 
-CUDA_UTIL_DIR ?= ~/projs/cuda-utils
-HTM_ARCH_DEPS ?= ~/projs/arch_dep
+CUDA_UTIL_DIR ?= $(CURR_DIR)/../deps/cuda-utils
+HTM_ARCH_DEPS ?= $(CURR_DIR)/../deps/arch_dep
+HTM_SGL       ?= $(CURR_DIR)/../deps/htm_alg
+PR_STM_DIR    ?= $(CURR_DIR)/../deps/pr-stm
 
 CFG           ?= prod
 

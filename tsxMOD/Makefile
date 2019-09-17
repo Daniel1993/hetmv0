@@ -1,8 +1,9 @@
 CURR_DIR      ?= ~/projs/HeTM_V0/tsxMOD
 HETM_ROOT     ?= $(CURR_DIR)/../hetm
-HTM_SGL       ?= ~/projs/htm_alg
-HTM_ARCH_DEPS ?= ~/projs/arch_dep
-CUDA_UTIL_DIR ?= ~/projs/cuda-utils
+
+CUDA_UTIL_DIR ?= $(CURR_DIR)/../deps/cuda-utils
+HTM_ARCH_DEPS ?= $(CURR_DIR)/../deps/arch_dep
+HTM_SGL       ?= $(CURR_DIR)/../deps/htm_alg
 
 CFG           ?= prod
 

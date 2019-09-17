@@ -1,13 +1,14 @@
 CURR_DIR      ?= ~/projs/HeTM_V0/hetm
+
 CUDA_PATH     ?= /usr/local/cuda
 TINY_ROOT     ?= $(CURR_DIR)/../tinyMOD
 TSX_ROOT      ?= $(CURR_DIR)/../tsxMOD
-HTM_SGL       ?= ~/projs/htm_alg
-INPUT_HANDLER ?= ~/projs/HeTM_V0/shared
+INPUT_HANDLER ?= $(CURR_DIR)/../shared
 
-CUDA_UTIL_DIR ?= ~/projs/cuda-utils
-HTM_ARCH_DEPS ?= ~/projs/arch_dep
-PR_STM_DIR    ?= ~/projs/pr-stm
+CUDA_UTIL_DIR ?= $(CURR_DIR)/../deps/cuda-utils
+HTM_ARCH_DEPS ?= $(CURR_DIR)/../deps/arch_dep
+HTM_SGL       ?= $(CURR_DIR)/../deps/htm_alg
+PR_STM_DIR    ?= $(CURR_DIR)/../deps/pr-stm
 
 CFG           ?= prod
 

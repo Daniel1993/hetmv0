@@ -1,17 +1,20 @@
 ### TODO: create include files for pr-stm, cuda-utils, tsx and tiny
 
+### set this to point the benchmark
 CURR_DIR      ?= ~/projs/HeTM_V0/bank
+
 TINY_ROOT     ?= $(CURR_DIR)/../tinyMOD
 TSX_ROOT      ?= $(CURR_DIR)/../tsxMOD
 HETM_ROOT     ?= $(CURR_DIR)/../hetm
-HTM_SGL       ?= ~/projs/htm_alg
-PR_STM_DIR    ?= ~/projs/pr-stm
-CUDA_PATH     ?= /usr/local/cuda
-INPUT_HANDLER ?= ~/projs/HeTM_V0/shared
-SHARED        ?= ~/projs/HeTM_V0/shared_bench
+INPUT_HANDLER ?= $(CURR_DIR)/../shared
+SHARED        ?= $(CURR_DIR)/../shared_bench
 
-CUDA_UTIL_DIR ?= ~/projs/cuda-utils
-HTM_ARCH_DEPS ?= ~/projs/arch_dep
+CUDA_UTIL_DIR ?= $(CURR_DIR)/../deps/cuda-utils
+HTM_ARCH_DEPS ?= $(CURR_DIR)/../deps/arch_dep
+HTM_SGL       ?= $(CURR_DIR)/../deps/htm_alg
+PR_STM_DIR    ?= $(CURR_DIR)/../deps/pr-stm
+
+CUDA_PATH     ?= /usr/local/cuda
 
 CFG           ?= prod
 
@@ -63,7 +66,7 @@ NVFLAGS    := -c $(DEFINES) $(INCLUDES) -std=c++11 \
 	-arch sm_50
 LDFLAGS    := $(LIBS) \
 --default-stream per-thread \
--arch sm_50
+-arch sm_50 -l tbb -l tbbmalloc
 
 ifeq ($(USE_TSX_IMPL),1)
 TSX_FLAGS += -DUSE_TSX_IMPL
@@ -85,8 +88,9 @@ NVFLAGS  += -O3 -DNDEBUG
 endif
 
 SRC        := $(CURR_DIR)/src
+### TODO: to use the version that enqueues requests in a different thread use bank_w_enqueue.o instead of bank.o
 BANK_OBJS  := \
-	$(SRC)/bank.o \
+	$(SRC)/bank_w_enqueue.o \
 	$(SRC)/bankTXs.o \
 	$(SRC)/bankKernel.o \
 	$(SRC)/cmp_kernels.o \
