@@ -60,8 +60,11 @@ __global__ void HeTM_knl_checkTxBitmapCache(HeTM_knl_cmp_args_s args)
   rset[id] = isConfl ? args.batchCount : 0;
   rwsetConfl[id] = isConflW ? 1 : 0;
 
+  // printf("id=%i rset[id]=%i rwsetConfl[id]=%i\n", id, (int)rset[id], (int)rwsetConfl[id]);
+
   if (isConfl) {
     *HeTM_knl_global.isInterConfl = 1;
+    // printf("GPU conflict found\n");
     // ((unsigned char*)(HeTM_knl_global.hostWSetCacheConfl))[cacheId] = args.batchCount;
   }
 }

@@ -5,15 +5,17 @@
 #include <mutex>
 
 #define LOCK(mtx) \
-while (!__sync_bool_compare_and_swap(&mtx, 0, 1)) PAUSE()
+  while (!__sync_bool_compare_and_swap(&mtx, 0, 1)) PAUSE() \
+//
 
 #define UNLOCK(mtx) \
-mtx = 0; \
-__sync_synchronize()
+  mtx = 0; \
+  __sync_synchronize() \
+//
 
 using namespace std;
 
-#define SGL_SIZE 32
+#define SGL_SIZE 128
 #define SGL_POS  16
 
 static volatile int64_t CL_ALIGN HTM_SGL_var[SGL_SIZE] = { -1 };
@@ -32,7 +34,7 @@ static int threads;
 static int thr_counter;
 
 static __thread int is_record;
-static __thread int tid;
+static __thread int tid = -1;
 
 void HTM_init_(int init_budget, int nb_threads)
 {
@@ -48,14 +50,21 @@ void HTM_exit()
   HTM_EXIT();
 }
 
-void HTM_thr_init()
+int HTM_thr_init(int reqTID)
 {
+  if (tid != -1) return tid; // TODO
   mtx.lock();
-  tid = thr_counter++;
-  HTM_SGL_tid = tid;
+  if (reqTID != -1) {
+    tid = reqTID;
+    HTM_SGL_tid = reqTID;
+  } else {
+    tid = thr_counter++;
+    HTM_SGL_tid = tid;
+  }
   HTM_SGL_var_addr = (int64_t * volatile)&(HTM_SGL_var[SGL_POS]);
   HTM_THR_INIT();
   mtx.unlock();
+  return tid;
 }
 
 void HTM_thr_exit()
@@ -72,9 +81,11 @@ void HTM_set_budget(int _budget) { init_budget = _budget; }
 void HTM_enter_fallback()
 {
   // mtx.lock();
-  while (*HTM_SGL_var_addr != tid) {
+  while (__atomic_load_n(HTM_SGL_var_addr, __ATOMIC_ACQUIRE) != tid) {
+    while (__atomic_load_n(HTM_SGL_var_addr, __ATOMIC_ACQUIRE) != -1) {
+      PAUSE();
+    }
     __sync_val_compare_and_swap(HTM_SGL_var_addr, -1, tid);
-    PAUSE();
   }
 
   // HTM_SGL_var = 1;
@@ -85,13 +96,14 @@ void HTM_enter_fallback()
 void HTM_exit_fallback()
 {
   // __sync_val_compare_and_swap(&HTM_SGL_var, 1, 0);
+  // __asm__ __volatile__("mfence" ::: "memory");
   __atomic_store_n(HTM_SGL_var_addr, -1, __ATOMIC_RELEASE);
   // mtx.unlock();
 }
 
 void HTM_block()
 {
-  while(__atomic_load_n(HTM_SGL_var_addr, __ATOMIC_ACQUIRE) == tid) {
+  while(__atomic_load_n(HTM_SGL_var_addr, __ATOMIC_ACQUIRE) != -1) {
     PAUSE();
   }
 
@@ -114,9 +126,9 @@ void HTM_inc_status_count(int status_code)
 //   return res;
 // }
 
-int HTM_get_status_count(int status_code, int **accum)
+long HTM_get_status_count(int status_code, long **accum)
 {
-  int res = 0;
+  long res = 0;
   res = HTM_SGL_errors[status_code];
   if (accum != NULL) {
     accum[tid][status_code] = HTM_SGL_errors[status_code];

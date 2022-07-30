@@ -267,9 +267,10 @@ struct thread_data {
 
 	struct thread_data *dthreads;
 
-  char padding[64];
+  // char padding[64];
 
-} __attribute__((packed));
+};
+// __attribute__((packed));
 
 // GLOBALS
 extern long long int global_fix;
@@ -368,11 +369,17 @@ int bank_sum(bank_t *bank);
 #define CPU_ACCESS(r, size) \
 	RANDOM_ACCESS(r, NO_INTERSECT_CPU_BOT_IDX(size), NO_INTERSECT_CPU_TOP_IDX(size)) \
 //
+#define CPU_ACCESS_SMALLER(r, size) \
+	RANDOM_ACCESS(r, NO_INTERSECT_CPU_TOP_IDX(size)-(long)(0.001*size), NO_INTERSECT_CPU_TOP_IDX(size)) \
+//
 #define GPU_ACCESS(r, size) \
 	RANDOM_ACCESS(r, NO_INTERSECT_GPU_BOT_IDX(size), NO_INTERSECT_GPU_TOP_IDX(size)) \
 //
 #define INTERSECT_ACCESS(r, size) \
 	RANDOM_ACCESS(r, INTERSECT_BOT_IDX(size), INTERSECT_TOP_IDX(size)) \
+//
+#define GPU_ACCESS_SMALLER(r, size) \
+	RANDOM_ACCESS(r, NO_INTERSECT_GPU_BOT_IDX(size), NO_INTERSECT_GPU_BOT_IDX(size)+(long)(0.001*size)) \
 //
 #define INTERSECT_ACCESS_GPU(r, size) \
 	RANDOM_ACCESS(r, GPU_BOT_IDX(size), INTERSECT_TOP_IDX(size)) \

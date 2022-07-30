@@ -16,7 +16,7 @@ static __inline__ unsigned long long rdtsc(void) {
 #elif defined(__x86_64__)
 
 #define rdtsc(void) ({ \
-    register unsigned long long _res; \
+    unsigned long long _res; \
     __asm__ __volatile__ ( \
 		"xor %%rax,%%rax \n\t" \
 		"rdtsc           \n\t" \
@@ -30,7 +30,7 @@ static __inline__ unsigned long long rdtsc(void) {
 })
 
 #define rdtscp(void) ({ \
-    register unsigned long long res; \
+    unsigned long long res; \
     __asm__ __volatile__ ( \
 		"xor %%rax,%%rax \n\t" \
 		"rdtscp          \n\t" \
@@ -39,7 +39,7 @@ static __inline__ unsigned long long rdtsc(void) {
 		"mov %%rdx,%0" \
 		: "=r"(res) \
 		: \
-		: "rax", "rdx"); \
+		: "rax", "rdx", "ecx"); \
     res; \
 })
 

@@ -58,7 +58,8 @@ FILE *CPU_input_file = NULL;
 
 static int fill_GPU_input_buffers()
 {
-	int buffer_last = size_of_GPU_input_buffer/sizeof(int) * NB_OF_BUFFERS;
+	volatile int buffer_last = size_of_GPU_input_buffer/sizeof(int) * NB_OF_BUFFERS;
+	volatile unsigned rnd = 0;
 
 	memman_select("GPU_input_buffer_good");
 	int *cpu_ptr = (int*)memman_get_cpu(NULL);
@@ -67,7 +68,7 @@ static int fill_GPU_input_buffers()
 	// if (parsedData.nb_accounts % PAGE_SIZE) nbPages++;
 
 #if BANK_PART == 1 /* Uniform at random: split */
-	unsigned rnd = RAND_R_FNC(input_seed);
+	rnd = RAND_R_FNC(input_seed);
 	for (int i = 0; i < buffer_last; ++i) {
 		cpu_ptr[i] = GPU_ACCESS(rnd, parsedData.nb_accounts-20);
 		rnd = RAND_R_FNC(input_seed);
@@ -86,7 +87,7 @@ static int fill_GPU_input_buffers()
 		rnd = RAND_R_FNC(input_seed);
 	}
 #elif BANK_PART == 2 /* Uniform at random: interleaved CPU accesses incremental pages */
-	unsigned rnd = RAND_R_FNC(input_seed);
+	rnd = RAND_R_FNC(input_seed);
 	for (int i = 0; i < buffer_last; ++i) {
 		unsigned j = rnd % parsedData.nb_accounts;
 		cpu_ptr[i] = j;
@@ -109,7 +110,6 @@ static int fill_GPU_input_buffers()
 	GPU_input_file = fopen(parsedData.GPUInputFile, "r");
 	printf("Opening %s\n", parsedData.GPUInputFile);
 
-	unsigned rnd; // RAND_R_FNC(input_seed);
 	for (int i = 0; i < buffer_last; ++i) {
 		// int access = GPU_ACCESS(rnd, (parsedData.nb_accounts-BANK_NB_TRANSFERS-1));
 		if (!fscanf(GPU_input_file, "%i\n", &rnd)) {
@@ -134,8 +134,6 @@ static int fill_GPU_input_buffers()
 
 	unsigned maxGen = parsedData.nb_accounts;
 	zipf_setup(maxGen, 0.8);
-	unsigned rnd;
-
 	for (int i = 0; i < buffer_last; ++i) {
 		rnd = zipf_gen();
 		cpu_ptr[i] = rnd;
@@ -151,7 +149,7 @@ static int fill_GPU_input_buffers()
 
 #elif BANK_PART == 5 || BANK_PART == 9 || BANK_PART == 10
 	// TODO: I should use more input buffers: some caching effects may show up
-	unsigned rnd = RAND_R_FNC(input_seed);
+	rnd = RAND_R_FNC(input_seed);
 	for (int i = 0; i < buffer_last; ++i) {
 		unsigned cnfl_rnd = RAND_R_FNC(input_seed);
 		unsigned pos = RAND_R_FNC(input_seed);
@@ -182,10 +180,9 @@ static int fill_GPU_input_buffers()
 		}
 	}
 #elif BANK_PART == 6 /* BANK_PART == 6 contiguous */
-	unsigned rnd = 0;
 	for (int i = 0; i < buffer_last; ++i) {
 		cpu_ptr[i] = GPU_ACCESS(rnd, parsedData.nb_accounts-20);
-		rnd += parsedData.read_intensive_size + 1;
+		rnd = (rnd + parsedData.read_intensive_size + 1) % 8192;
 	}
 
 	memman_select("GPU_input_buffer_bad");
@@ -198,10 +195,10 @@ static int fill_GPU_input_buffers()
 			continue;
 		}
 		cpu_ptr[i] = INTERSECT_ACCESS_GPU(rnd, parsedData.nb_accounts-20);
-		rnd += parsedData.read_intensive_size + 1;
+		rnd = (rnd + parsedData.read_intensive_size + 1) % 8192;
 	}
 #elif BANK_PART == 7 || BANK_PART == 8 /* not used on CPU, GPU blocks */
-	unsigned rnd = RAND_R_FNC(input_seed);
+	rnd = RAND_R_FNC(input_seed);
 	for (int i = 0; i < buffer_last; ++i) {
 		cpu_ptr[i] = GPU_ACCESS(rnd, parsedData.nb_accounts-20);
 		rnd = RAND_R_FNC(input_seed);
@@ -220,6 +217,7 @@ static int fill_GPU_input_buffers()
 		rnd = RAND_R_FNC(input_seed);
 	}
 #endif /* BANK_PART == 1 */
+	return 0;
 }
 
 static int fill_CPU_input_buffers()
@@ -370,6 +368,7 @@ static int fill_CPU_input_buffers()
 		rnd += parsedData.read_intensive_size + 16;
 	}
 #endif /* BANK_PART */
+	return 0;
 }
 
 static inline int total(bank_t *bank, int transactional)
@@ -404,6 +403,7 @@ static int transfer(account_t *accounts, volatile unsigned *positions, int count
 	void *dst;
 	void *pos[count];
 	void *pos_write;
+	void *pos_write2;
 
 #if BANK_PART == 7
 	pos_write = &accounts[HeTM_thread_data->id * 16];
@@ -427,6 +427,8 @@ static int transfer(account_t *accounts, volatile unsigned *positions, int count
 	int halfAccounts = parsedData.nb_accounts / 2;
 	int writeAccountIdx = (positions[0] - halfAccounts) / parsedData.access_controller + halfAccounts;
 	pos_write = &accounts[writeAccountIdx];
+	int writeAccountIdx2 = (positions[1] - halfAccounts) / parsedData.access_controller + halfAccounts;
+	pos_write2 = &accounts[writeAccountIdx2];
 
 #endif /* BANK_PART == 7 */
 
@@ -466,6 +468,7 @@ static int transfer(account_t *accounts, volatile unsigned *positions, int count
 	// -----------------
 
 	TM_STORE(pos_write, load1); // TODO: now is 2 reads 1 write
+	TM_STORE(pos_write2, load1); // TODO: now is 2 reads 1 write
 	// TM_STORE(&accounts[dst], load2);
 
 #endif /* BANK_PART != 7 */
@@ -617,6 +620,10 @@ static void test(int id, void *data)
 
 	int index = buffers_start+id*NB_CPU_TXS_PER_THREAD + curr_tx;
 	accounts_vec[0] = CPUInputBuffer[index];
+	curr_tx += 1;
+	curr_tx = curr_tx % NB_CPU_TXS_PER_THREAD;
+	int index1 = buffers_start+id*NB_CPU_TXS_PER_THREAD + curr_tx;
+	accounts_vec[1] = CPUInputBuffer[index1];
 
 	// if (accounts_vec[0] == 0) {
 	// 	printf("conflict access stm_baseMemPool=%p accounts=%p\n", stm_baseMemPool, accounts);
@@ -871,6 +878,7 @@ static void afterGPU(int id, void *data)
   // leave this one
   printf("CUDA thread terminated after %li(%li successful) run(s). \nTotal cuda execution time: %f ms.\n",
     HeTM_stats_data.nbBatches, HeTM_stats_data.nbBatchesSuccess, HeTM_stats_data.timeGPU);
+	HeTM_flush_barrier();
 }
 
 /* ################################################################### *

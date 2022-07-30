@@ -29,7 +29,8 @@ LIBS     := \
 	-L $(TINY_ROOT)/lib -lstm -lpthread \
 #
 LIB  := libhetm.a
-NVCC := nvcc
+# NVCC := nvcc
+NVCC ?= $(CUDA_PATH)/bin/nvcc
 CC   := gcc
 CXX  := g++
 AR   := ar rcs
@@ -55,17 +56,17 @@ CFLAGS     := -c $(DEFINES) $(INCLUDES)
 CXXFLAGS   := -c $(DEFINES) $(INCLUDES) -std=c++11
 NVFLAGS    := -c $(DEFINES) $(INCLUDES) -std=c++11 \
 	--default-stream per-thread \
-	-arch sm_30
+	-arch sm_60
 LDFLAGS    := $(LIBS) \
 --default-stream per-thread \
--arch sm_30
+-arch sm_60
 
 ifeq ($(USE_TSX_IMPL),1)
 TSX_FLAGS += -DUSE_TSX_IMPL
-CFLAGS    += $(TSX_FLAGS) -mrtm
-CXXFLAGS  += $(TSX_FLAGS) -mrtm
-NVFLAGS   += $(TSX_FLAGS) --compiler-options='-mrtm'
 endif
+CFLAGS    += $(TSX_FLAGS) -march=native -mrtm
+CXXFLAGS  += $(TSX_FLAGS) -march=native -mrtm
+NVFLAGS   += $(TSX_FLAGS) --compiler-options='-march=native -mrtm'
 
 ifeq ($(CFG),debug)
 CFLAGS   += $(DEBUG_FLAGS)

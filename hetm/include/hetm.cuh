@@ -280,6 +280,7 @@ void HeTM_async_request(HeTM_async_req_s req);
 void HeTM_free_async_request(HeTM_async_req_s *req); // Do not call this
 
 int HeTM_sync_barrier(); // Do not call this
+int HeTM_flush_barrier(); // Do not call this
 
 // Waits the threads. Note: HeTM_set_is_stop(1) must be called
 // before so the threads know it is time to stop
@@ -316,8 +317,7 @@ int HeTM_reset_GPU_state(long batchCount);
 // #define HETM_DEB_THREADING(...) printf("[THR]"); HETM_PRINT(__VA_ARGS__)
 #define HETM_DEB_THREADING(...) /* empty */
 #define HETM_DEB_THRD_CPU(...)  printf("[CPU]"); HETM_PRINT(__VA_ARGS__)
-// #define HETM_DEB_THRD_GPU(...)  printf("[GPU]"); HETM_PRINT(__VA_ARGS__)
-#define HETM_DEB_THRD_GPU(...)  /* empty */
+#define HETM_DEB_THRD_GPU(...)  printf("[GPU]"); HETM_PRINT(__VA_ARGS__)
 
 #else /* !HETM_DEB */
 #define HETM_PRINT(...) /* empty */

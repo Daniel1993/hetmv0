@@ -22,6 +22,7 @@ if (((var) = (__typeof__((var)))malloc((nb) * sizeof(__typeof__(*(var))))) == NU
 #define barrier_init(b, n) ticket_barrier_init(&b, (unsigned)n)
 #define barrier_destroy(b) ticket_barrier_destroy(&b)
 #define barrier_cross(b)   ticket_barrier_cross(&b)
+#define barrier_reset(b)   ticket_barrier_reset(&b)
 
 #define COMPILER_FENCE() asm("" ::: "memory")
 

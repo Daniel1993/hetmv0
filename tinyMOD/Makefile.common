@@ -16,14 +16,14 @@ SRCDIR = $(ROOT)/src
 INCDIR = $(ROOT)/include
 
 HETM_DIR ?= $(CURR_DIR)/../hetm
-CUDA_UTIL_DIR ?= ~/projs/cuda-utils
-ARCH_DEP_DIR ?= ~/projs/arch_dep
+CUDA_UTIL_DIR ?= $(CURR_DIR)/../deps/cuda-utils
+ARCH_DEP_DIR ?= $(CURR_DIR)/../deps/arch_dep
 
 LIBDIR = $(ROOT)/lib
 CUDIR = /usr/local/cuda
 CUINCDIR = ${CUDIR}/include
 CULIBDIR = ${CUDIR}/lib64
-CUFLAGS = -L${CULIBDIR} -lcudart -lcuda -I${CUINCDIR}
+CUFLAGS = -L${CULIBDIR} -L${CUDIR}/compat -lcudart -lcuda -I${CUINCDIR}
 TMLIB = $(LIBDIR)/lib$(TM).a
 
 LOG_TYPE ?= VERS

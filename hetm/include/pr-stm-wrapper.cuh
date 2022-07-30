@@ -174,6 +174,7 @@
 	void *_RSetBitmap = GPU_log->dev_rset; \
 	void *_RSetBitmap_cache = GPU_log->dev_rset_cache; \
 	ByteM_SET_POS(_pos_cache, _RSetBitmap_cache, GPU_log->batchCount); \
+	/*printf("set on cache %i pos = %i\n",  GPU_log->batchCount, _pos_cache);*/ \
 	ByteM_SET_POS(_pos, _RSetBitmap, GPU_log->batchCount) \
 //
 #else /* VERS */

@@ -79,7 +79,7 @@ int HeTM_init(HeTM_init_s init)
   HeTM_offload_pc = hetm_pc_init(HETM_PC_BUFFER_SIZE);
   knlman_add_stream();
   HeTM_memStream = knlman_get_current_stream();
-  knlman_add_stream();
+  // knlman_add_stream();
   HeTM_memStream2 = knlman_get_current_stream();
 
   return 0;
@@ -111,7 +111,10 @@ int HeTM_get_inter_confl_flag(void *stream, int doSync) {
   }
   memman_select("HeTM_interConflFlag");
   memman_cpy_to_cpu(stream, NULL, 1);
-  if (doSync) { cudaStreamSynchronize((cudaStream_t)stream); }
+  if (doSync) { 
+    if (stream) cudaStreamSynchronize((cudaStream_t)stream);
+    else cudaDeviceSynchronize();
+  }
   return *HeTM_shared_data.hostInterConflFlag;
 }
 
@@ -126,6 +129,12 @@ int HeTM_reset_inter_confl_flag() {
 int HeTM_sync_barrier()
 {
   barrier_cross(HeTM_shared_data.GPUBarrier);
+  return 0;
+}
+
+int HeTM_flush_barrier()
+{
+  barrier_reset(HeTM_shared_data.GPUBarrier);
   return 0;
 }
 

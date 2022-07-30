@@ -4,16 +4,16 @@
 typedef struct ticket_barrier_ ticket_barrier_t;
 struct ticket_barrier_
 {
-	unsigned count_next;
-	unsigned total;
+	volatile unsigned count_next;
+	volatile unsigned total;
 	union
 	{
 		struct
 		{
-			unsigned count_in;
-			unsigned count_out;
+			volatile unsigned count_in;
+			volatile unsigned count_out;
 		};
-		unsigned long long reset;
+		volatile unsigned long long reset;
 	};
 };
 
@@ -24,6 +24,7 @@ extern "C" {
 void ticket_barrier_init(ticket_barrier_t *b, unsigned count);
 void ticket_barrier_destroy(ticket_barrier_t *b);
 int ticket_barrier_cross(ticket_barrier_t *b);
+int ticket_barrier_reset(ticket_barrier_t *b);
 
 #ifdef __cplusplus
 }

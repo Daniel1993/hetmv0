@@ -8,7 +8,7 @@
 // #include "cmp_kernels.cuh"
 #include "pr-stm-wrapper.cuh"
 #include "bitmap.h"
-#include "hetm-log.h"
+// #include "hetm-log.h"
 
 #define CMP_EXPLICIT_THRS_PER_RSET 1024 /* divide per CMP_EXPLICIT_THRS_PER_WSET */
 #define CMP_EXPLICIT_THRS_PER_WSET 32 /* nb. of entries to compare */

@@ -32,7 +32,7 @@ INCLUDES := -I $(CUDA_UTIL_DIR)/include \
 #
 DEFINES  :=
 #
-LIBS     := -L $(CUDA_PATH)/lib64 -lcudart -lcuda -lnuma \
+LIBS     := -L $(CUDA_PATH)/lib64 -L $(CUDA_PATH)/compat -lcudart -lcuda -lnuma \
 	-L $(INPUT_HANDLER) -linput_handler \
 	-L $(TINY_ROOT)/lib -lstm -lpthread \
 	-L $(HETM_ROOT) -lhetm \
@@ -40,7 +40,8 @@ LIBS     := -L $(CUDA_PATH)/lib64 -lcudart -lcuda -lnuma \
 #
 APP  = bank
 BENCH= memcd
-NVCC = nvcc
+# NVCC = nvcc
+NVCC ?= $(CUDA_PATH)/bin/nvcc
 CC   = gcc
 CXX  = g++
 
@@ -59,20 +60,20 @@ INCLUDES  += -I $(HTM_SGL)/include
 LIBS      += -L $(HTM_SGL)/bin -lhtm_sgl -L $(TSX_ROOT) -ltsxMOD
 endif
 
-CFLAGS     := -c $(DEFINES) $(INCLUDES) -std=c99
-CXXFLAGS   := -c $(DEFINES) $(INCLUDES) -std=c++11
-NVFLAGS    := -c $(DEFINES) $(INCLUDES) -std=c++11 \
+CFLAGS     := -c $(DEFINES) $(INCLUDES) -std=c17
+CXXFLAGS   := -c $(DEFINES) $(INCLUDES) -std=c++17
+NVFLAGS    := -c $(DEFINES) $(INCLUDES) -std=c++17 \
 	--default-stream per-thread \
-	-arch sm_50
+	-arch sm_60
 LDFLAGS    := $(LIBS) \
 --default-stream per-thread \
--arch sm_50 -l tbb -l tbbmalloc
+-arch sm_60 -l tbb -l tbbmalloc
 
 ifeq ($(USE_TSX_IMPL),1)
 TSX_FLAGS += -DUSE_TSX_IMPL
 CFLAGS    += $(TSX_FLAGS) -mrtm
 CXXFLAGS  += $(TSX_FLAGS) -mrtm
-NVFLAGS   += $(TSX_FLAGS) --compiler-options='-mrtm'
+NVFLAGS   += $(TSX_FLAGS) --compiler-options='-march=native -mrtm'
 endif
 
 ifeq ($(CFG),debug)
@@ -82,15 +83,16 @@ NVFLAGS  += $(NV_DEB_FLAGS)
 endif
 
 ifneq ($(CFG),debug)
-CFLAGS   += -O3 -DNDEBUG
-CXXFLAGS += -O3 -DNDEBUG
-NVFLAGS  += -O3 -DNDEBUG
+CFLAGS   += -g -O2 -march=native -DNDEBUG
+CXXFLAGS += -g -O2 -march=native -DNDEBUG
+NVFLAGS  += -g -O2 -DNDEBUG
 endif
 
 SRC        := $(CURR_DIR)/src
 ### TODO: to use the version that enqueues requests in a different thread use bank_w_enqueue.o instead of bank.o
+	# $(SRC)/bank_w_enqueue.o 
 BANK_OBJS  := \
-	$(SRC)/bank_w_enqueue.o \
+	$(SRC)/bank.o \
 	$(SRC)/bankTXs.o \
 	$(SRC)/bankKernel.o \
 	$(SRC)/cmp_kernels.o \
@@ -123,7 +125,7 @@ all: $(APP)
 simple: $(OBJS)
 	# does not recompile everything
 	# $(CXX) $(CXXFLAGS) -Os -o $(SRC)/bank.o $(SRC)/bank.cpp
-	$(CXX) $(CXXFLAGS) -O0 -o $(SRC)/bankTXs.o $(SRC)/bankTXs.cpp
+	$(CXX) $(CXXFLAGS) -o $(SRC)/bankTXs.o $(SRC)/bankTXs.cpp
 	#$(CXX) $(CXXFLAGS) -O1 -o $(SRC)/memcd2.o $(SRC)/memcd2.cpp
 	$(NVCC) $(LDFLAGS) -o $(APP) $(OBJS)
 

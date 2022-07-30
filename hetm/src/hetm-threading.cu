@@ -96,10 +96,12 @@ int HeTM_start(HeTM_callback CPUclbk, HeTM_callback GPUclbk, void *args)
 int HeTM_join_CPU_threads()
 {
   // WARNING: HeTM_set_is_stop(1) must be called before this point
+  HeTM_flush_barrier();
   barrier_cross(wait_callback);
   int i;
-for (i = 0; i < HeTM_shared_data.nbThreads; i++) {
+  for (i = 0; i < HeTM_shared_data.nbThreads; i++) {
     HETM_DEB_THREADING("Joining with thread %i ...", i);
+    HeTM_flush_barrier();
     thread_join_or_die(HeTM_shared_data.threadsInfo[i].thread, NULL);
   }
   barrier_destroy(wait_callback);

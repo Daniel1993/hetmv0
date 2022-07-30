@@ -1,19 +1,19 @@
-#include "hetm.cuh"
-
 #include <stdlib.h>
 #include <stdio.h>
 #include <errno.h>
 #include <string.h>
+#include <map>
 #include <curand_kernel.h>
+
+#include "hetm-log.h"
 #include "memman.h"
 #include "knlman.h"
-#include "hetm-log.h"
 #include "pr-stm-wrapper.cuh"
 #include "hetm-cmp-kernels.cuh"
 
 #include "rdtsc.h"
+#include "hetm.cuh"
 
-#include <map>
 
 using namespace std;
 
@@ -521,6 +521,10 @@ static void init_bmap(size_t pool_size)
   malloc_or_die(cache_x64, cacheSize * 64);
   stm_wsetCPUCache_x64 = cache_x64;
 
+  memman_select("HeTM_cpu_wset_cache_confl");
+  memman_zero_cpu(NULL);
+  memman_zero_gpu(NULL);
+  HeTM_shared_data.wsetCacheConfl = memman_get_gpu(NULL);
   memman_select("HeTM_cpu_wset_cache_confl2");
   memman_zero_cpu(NULL);
   memman_zero_gpu(NULL);
@@ -529,10 +533,6 @@ static void init_bmap(size_t pool_size)
   memman_zero_cpu(NULL);
   memman_zero_gpu(NULL);
   HeTM_shared_data.wsetCacheConfl3 = memman_get_gpu(NULL);
-  memman_select("HeTM_cpu_wset_cache_confl");
-  memman_zero_cpu(NULL);
-  memman_zero_gpu(NULL);
-  HeTM_shared_data.wsetCacheConfl = memman_get_gpu(NULL);
 
   memman_select("HeTM_mempool");
   HeTM_shared_data.hostMemPool = memman_get_cpu(NULL);

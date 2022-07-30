@@ -35,22 +35,23 @@
 
 #ifndef PRINT_FLAGS
 #define PRINT_FLAGS() \
-  printf("Flag values: \n"); \
-  printf("    HETM_CPU_EN    =%i\n", HETM_CPU_EN); \
-  printf("    HETM_GPU_EN    =%i\n", HETM_GPU_EN); \
-  printf("    CMP_APPLY      =%i\n", CMP_APPLY); \
-  printf("    SYNC_BALANCING =%i\n", SYNC_BALANCING_VALUE); \
-  printf("    RUN_ONCE       =%i\n", RUN_ONCE); \
-  printf("    CPU_INV        =%i\n", CPU_INV_VALUE); \
-  printf("    NO_LOCK        =%i\n", NO_LOCK_VALUE); \
-  printf("    BM_TRANSF      =%i\n", BM_TRANSF); \
-  printf("    USE_STREAM     =%i\n", USE_STREAM_VALUE); \
-  printf("    USE_TSX_IMPL   =%i\n", USE_TSX_IMPL_VALUE); \
-  printf("    CPU_PART       =%f\n", CPU_PART); \
-  printf("    GPU_PART       =%f\n", GPU_PART); \
-  printf("    P_INTERSECT    =%f\n", P_INTERSECT); \
-  printf("    DEFAULT_blockNum  =%i\n", DEFAULT_blockNum); \
-  printf("    DEFAULT_threadNum =%i\n", DEFAULT_threadNum); \
+  printf("Flag values    : "); \
+  printf("HETM_CPU_EN=%i ", HETM_CPU_EN); \
+  printf("HETM_GPU_EN=%i ", HETM_GPU_EN); \
+  printf("CMP_APPLY=%i ", CMP_APPLY); \
+  printf("SYNC_BALANCING=%i ", SYNC_BALANCING_VALUE); \
+  printf("RUN_ONCE=%i ", RUN_ONCE); \
+  printf("CPU_INV=%i ", CPU_INV_VALUE); \
+  printf("NO_LOCK=%i ", NO_LOCK_VALUE); \
+  printf("BM_TRANSF=%i ", BM_TRANSF); \
+  printf("USE_STREAM=%i ", USE_STREAM_VALUE); \
+  printf("USE_TSX_IMPL=%i ", USE_TSX_IMPL_VALUE); \
+  printf("CPU_PART=%f ", CPU_PART); \
+  printf("GPU_PART=%f ", GPU_PART); \
+  printf("P_INTERSECT=%f ", P_INTERSECT); \
+  printf("DEFAULT_blockNum=%i ", DEFAULT_blockNum); \
+  printf("DEFAULT_threadNum=%i ", DEFAULT_threadNum); \
+  printf("\n"); \
 //
 #endif /* PRINT_FLAGS */
 

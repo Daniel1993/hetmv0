@@ -331,11 +331,15 @@ __device__ void update_tx2(PR_txCallDefArgs, int txCount)
 	for (i = 0; i < loopFor; i++) {
 		randNum = PR_rand(INT_MAX);
 		if (!isInter) {
-			accountIdx = GPU_ACCESS(randNum, nbAccounts);
+			// accountIdx = GPU_ACCESS(randNum, nbAccounts);
+			accountIdx = GPU_ACCESS_SMALLER(randNum, nbAccounts);
 		} else {
 #if BANK_PART == 9
 			// deterministic abort
-			accountIdx = /*(i == 0) ? id : */INTERSECT_ACCESS_GPU(randNum, nbAccounts);
+			if (id == 0 && i == 0)
+				accountIdx = 0;
+			else
+				accountIdx = /*(i == 0) ? id : */INTERSECT_ACCESS_GPU(randNum, nbAccounts);
 #else
 			accountIdx = INTERSECT_ACCESS_GPU(randNum, nbAccounts);
 #endif /* BANK_PART == 9 */
@@ -350,11 +354,15 @@ __device__ void update_tx2(PR_txCallDefArgs, int txCount)
 	for (i = 0; i < read_intensive_size; i++) {
 		randNum = PR_rand(INT_MAX); // 56; //
 		if (!isInter) {
-			accountIdx = GPU_ACCESS(randNum, nbAccounts);
+			// accountIdx = GPU_ACCESS(randNum, nbAccounts);
+			accountIdx = GPU_ACCESS_SMALLER(randNum, nbAccounts);
 		} else {
 #if BANK_PART == 9
 			// deterministic abort
-			accountIdx = /*(i == 0) ? id : */INTERSECT_ACCESS_GPU(randNum, nbAccounts);
+			if (id == 0 && i == 0)
+				accountIdx = 0;
+			else
+				accountIdx = /*(i == 0) ? id : */INTERSECT_ACCESS_GPU(randNum, nbAccounts);
 #else
 			accountIdx = INTERSECT_ACCESS_GPU(randNum, nbAccounts);
 #endif /* BANK_PART == 9 */
@@ -405,11 +413,15 @@ __device__ void readOnly_tx2(PR_txCallDefArgs, int txCount)
 	for (i = 0; i < loopFor; i++) {
 		randNum = PR_rand(INT_MAX);
 		if (!isInter) {
-			accountIdx = GPU_ACCESS(randNum, nbAccounts);
+			// accountIdx = GPU_ACCESS(randNum, nbAccounts);
+			accountIdx = GPU_ACCESS_SMALLER(randNum, nbAccounts);
 		} else {
 #if BANK_PART == 9
 			// deterministic abort
-			accountIdx = /*(i == 0) ? id : */INTERSECT_ACCESS_GPU(randNum, nbAccounts);
+			if (id == 0 && i == 0)
+				accountIdx = 0;
+			else
+				accountIdx = /*(i == 0) ? id : */INTERSECT_ACCESS_GPU(randNum, nbAccounts);
 #else
 			accountIdx = INTERSECT_ACCESS_GPU(randNum, nbAccounts);
 #endif /* BANK_PART == 9 */
@@ -443,6 +455,7 @@ __device__ void update_tx(PR_txCallDefArgs, int txCount)
 	int access_controller = devParsedData.access_controller;
 
 	unsigned writeAccountIdx;
+	unsigned writeAccountIdx2;
 	unsigned readAccountIdx;
 
 	// HeTM_GPU_log_s *GPU_log = (HeTM_GPU_log_s*)args.pr_args_ext;
@@ -478,6 +491,7 @@ __device__ void update_tx(PR_txCallDefArgs, int txCount)
 	target = 0;
 	// int writeAccountIdx = idx[target];
 	writeAccountIdx = (unsigned)((double)idx[target] / (double)access_controller);
+	writeAccountIdx2 = (unsigned)((double)idx[target+1] / (double)access_controller);
 
 	// must read the write
 	#ifndef BANK_DISABLE_PRSTM
@@ -514,10 +528,18 @@ __device__ void update_tx(PR_txCallDefArgs, int txCount)
 		if (writeAccountIdx < nbAccounts) {
 #ifndef BANK_DISABLE_PRSTM
 		  PR_write(accounts + writeAccountIdx, nval); //write changes to write set
+		  PR_write(accounts + writeAccountIdx, nval+1); //write changes to write set
 #else /* PR-STM disabled */
 	  	accounts[writeAccountIdx] = nval; //write changes to write set
 #endif
 		}
+// 		if (writeAccountIdx2 < nbAccounts) {
+// #ifndef BANK_DISABLE_PRSTM
+// 		  PR_write(accounts + writeAccountIdx2, nval); //write changes to write set
+// #else /* PR-STM disabled */
+// 	  	accounts[writeAccountIdx2] = nval; //write changes to write set
+// #endif
+// 		}
 		// __syncthreads();
 // TODO: only 1 write now
 // 		target = j*2+1;

@@ -34,21 +34,21 @@ extern __thread int64_t HTM_SGL_errors[HTM_NB_ERRORS];
 #define AFTER_TRANSACTION(tid, budget)  /* empty */
 
 #define UPDATE_BUDGET(tid, budget, status) \
-  HTM_inc_status_count(status); \
-  HTM_INC(status); \
+    HTM_inc_status_count(status); \
+    HTM_INC(status); \
 	budget = HTM_update_budget(budget, status)
 
 /* The HTM_SGL_update_budget also handle statistics */
 
-#define CHECK_SGL_NOTX() if (*HTM_SGL_var_addr != -1) { HTM_block(); }
-#define CHECK_SGL_HTM()  if (*HTM_SGL_var_addr != -1) { HTM_abort(); }
+#define CHECK_SGL_NOTX() if (__atomic_load_n(HTM_SGL_var_addr, __ATOMIC_ACQUIRE) != -1) { HTM_block(); }
+#define CHECK_SGL_HTM()  if (__atomic_load_n(HTM_SGL_var_addr, __ATOMIC_ACQUIRE) != -1) { HTM_abort(); }
 
 #define AFTER_BEGIN(tid, budget, status)   /* empty */
 #define BEFORE_COMMIT(tid, budget, status) /* empty */
 #define COMMIT_TRANSACTION(tid, budget, status) \
-	HTM_commit(); /* Commits and updates some statistics after */ \
-	HTM_inc_status_count(status); \
-  HTM_INC(status)
+    HTM_commit(); /* Commits and updates some statistics after */ \
+    HTM_inc_status_count(status); \
+    HTM_INC(status)
 
 #define ENTER_SGL(tid) HTM_enter_fallback()
 #define EXIT_SGL(tid)  HTM_exit_fallback()
@@ -128,7 +128,6 @@ extern __thread int64_t HTM_SGL_errors[HTM_NB_ERRORS];
     AFTER_TRANSACTION(HTM_SGL_tid, HTM_SGL_budget); \
 } \
 
-
 #define HTM_SGL_before_write(addr, val) /* empty */
 #define HTM_SGL_after_write(addr, val)  /* empty */
 
@@ -176,7 +175,7 @@ extern __thread int64_t HTM_SGL_errors[HTM_NB_ERRORS];
 #define HTM_init(nb_threads) HTM_init_(HTM_SGL_INIT_BUDGET, nb_threads)
 void HTM_init_(int init_budget, int nb_threads);
 void HTM_exit();
-void HTM_thr_init();
+int HTM_thr_init(int); // pass -1 to get an id
 void HTM_thr_exit();
 void HTM_block();
 
@@ -198,7 +197,7 @@ int HTM_get_is_record();
 /**
  * @accum : int[nb_threads][HTM_NB_ERRORS]
  */
-int HTM_get_status_count(int status_code, int **accum);
+long HTM_get_status_count(int status_code, long **accum);
 void HTM_reset_status_count();
 
 #ifdef __cplusplus

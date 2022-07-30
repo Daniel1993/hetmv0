@@ -55,9 +55,13 @@ stm_log_newentry(HETM_LOG_T *log, long* pos, int val, long vers)
 // TODO: this thing is useless now!!! check what this actually affects
   // set bitmap
   // TODO: 2 ==> PR_LOCK_GRAN_BITS
-  memman_access_addr_gran(stm_wsetCPU, stm_baseMemPool, pos, 1, 2, *hetm_batchCount);
   // memman_access_addr_gran(stm_wsetCPUCache, stm_baseMemPool, pos, 1, (stm_wsetCPUCacheBits+2), *hetm_batchCount);
-  memman_access_addr_gran_x64(stm_wsetCPUCache_x64, stm_baseMemPool, pos, 1, (stm_wsetCPUCacheBits+2), *hetm_batchCount);
+
+
+  memman_access_addr_gran(stm_wsetCPU, stm_baseMemPool, pos, 1, 2/*4B*/, *hetm_batchCount);
+  memman_access_addr_gran_x64(stm_wsetCPUCache_x64, stm_baseMemPool, pos, 1,
+    (stm_wsetCPUCacheBits+2)/*cache_gran+4B*/, *hetm_batchCount);
+
 
   /* ********************************************** */
 #else /* HETM_LOG_TYPE != HETM_BMAP_LOG */

@@ -206,7 +206,7 @@ static int fill_GPU_input_buffers()
 	unsigned rnd = 0;
 	for (int i = 0; i < buffer_last; ++i) {
 		cpu_ptr[i] = GPU_ACCESS(rnd, parsedData.nb_accounts-20);
-		rnd += parsedData.read_intensive_size + 1;
+		rnd += (parsedData.read_intensive_size + 1) % 8192;
 	}
 
 	memman_select("GPU_input_buffer_bad");
@@ -219,7 +219,7 @@ static int fill_GPU_input_buffers()
 			continue;
 		}
 		cpu_ptr[i] = INTERSECT_ACCESS_GPU(rnd, parsedData.nb_accounts-20);
-		rnd += parsedData.read_intensive_size + 1;
+		rnd += (parsedData.read_intensive_size + 1) % 8192;
 	}
 #elif BANK_PART == 7 || BANK_PART == 8 /* not used on CPU, GPU blocks */
 	unsigned rnd = RAND_R_FNC(input_seed);
@@ -241,6 +241,7 @@ static int fill_GPU_input_buffers()
 		rnd = RAND_R_FNC(input_seed);
 	}
 #endif /* BANK_PART == 1 */
+	return 0;
 }
 
 static int fill_CPU_input_buffers()
@@ -362,7 +363,8 @@ static int fill_CPU_input_buffers()
 	unsigned rnd = 0;
 	for (int i = 0; i < good_buffers_last; ++i) {
 		CPUInputBuffer[i] = CPU_ACCESS(rnd, parsedData.nb_accounts-20);
-		rnd += parsedData.read_intensive_size + 5;
+		// printf("[%i]: %i (rnd=%u, size=%u)\n", i, CPUInputBuffer[i], rnd, parsedData.nb_accounts-20);
+		rnd = (rnd + parsedData.read_intensive_size + 5) % 8192;
 	}
 
 	rnd = 0;
@@ -371,8 +373,8 @@ static int fill_CPU_input_buffers()
 			CPUInputBuffer[i] = 0; // deterministic intersection
 			continue;
 		}
-		CPUInputBuffer[i] = INTERSECT_ACCESS_CPU(i, parsedData.nb_accounts-20);
-		rnd += parsedData.read_intensive_size + 5;
+		CPUInputBuffer[i] = INTERSECT_ACCESS_CPU(rnd, parsedData.nb_accounts-20);
+		rnd = (rnd + parsedData.read_intensive_size + 5) % 8192;
 	}
 #elif BANK_PART == 7 || BANK_PART == 8 /* random on GPU contiguous on CPU */
 	unsigned rnd = 0;
@@ -391,6 +393,7 @@ static int fill_CPU_input_buffers()
 		rnd += parsedData.read_intensive_size + 16;
 	}
 #endif /* BANK_PART */
+	return 0;
 }
 
 static inline int total(bank_t *bank, int transactional)
@@ -436,6 +439,22 @@ static int transfer(account_t *accounts, volatile unsigned *positions, int count
 	unsigned rnd_pos = (rnd % partionSize) * HeTM_thread_data->id;
 	rnd_pos = rnd_pos / parsedData.access_controller;
 	pos_write = &accounts[rnd_pos];
+
+#elif BANK_PART == 6
+	void *pos_write2;
+	for (n = 0; n < count; n += 2) {
+		pos[n] = &accounts[positions[n]];
+		pos[n+1] = &accounts[positions[n+1]];
+		__builtin_prefetch(pos[n], 0, 0);
+		__builtin_prefetch(pos[n+1], 0, 0);
+		// printf("prefetch %i and %i\n", positions[n], positions[n+1]);
+	}
+
+	int halfAccounts = parsedData.nb_accounts / 2;
+	int writeAccountIdx = (positions[0] - halfAccounts) / parsedData.access_controller + halfAccounts;
+	int writeAccountIdx2 = (positions[1] - halfAccounts) / parsedData.access_controller + halfAccounts;
+	pos_write = &accounts[writeAccountIdx];
+	pos_write2 = &accounts[writeAccountIdx2];
 #else
 	for (n = 0; n < count; n += 2) {
 		pos[n] = &accounts[positions[n]];
@@ -448,7 +467,6 @@ static int transfer(account_t *accounts, volatile unsigned *positions, int count
 	int halfAccounts = parsedData.nb_accounts / 2;
 	int writeAccountIdx = (positions[0] - halfAccounts) / parsedData.access_controller + halfAccounts;
 	pos_write = &accounts[writeAccountIdx];
-
 #endif /* BANK_PART == 7 */
 
   /* Allow overdrafts */
@@ -487,7 +505,9 @@ static int transfer(account_t *accounts, volatile unsigned *positions, int count
 	// -----------------
 
 	TM_STORE(pos_write, load1); // TODO: now is 2 reads 1 write
-	// TM_STORE(&accounts[dst], load2);
+#if BANK_PART == 6
+	TM_STORE(pos_write2, load2);
+#endif
 
 #endif /* BANK_PART != 7 */
   TM_COMMIT;
@@ -497,7 +517,6 @@ static int transfer(account_t *accounts, volatile unsigned *positions, int count
 // loop:
 //   j++;
 //   if (j < 100) goto loop;
-
   return amount;
 }
 
@@ -621,7 +640,7 @@ static void reset(bank_t *bank)
 
 static void* test_enqueuer(void *data)
 {
-	int id;
+	volatile int id;
 	enqueue_req_t  *req;
 	thread_data_t    *d = (thread_data_t *)data;
 	cuda_t          *cd = d->cd;
@@ -643,7 +662,12 @@ static void* test_enqueuer(void *data)
 		int bad_buffers_start = size_of_CPU_input_buffer/sizeof(int) * NB_OF_BUFFERS;
 		int buffers_start = isInterBatch ? bad_buffers_start : good_buffers_start;
 
-		int index = buffers_start+id*NB_CPU_TXS_PER_THREAD + curr_tx;
+		long index = buffers_start+id*NB_CPU_TXS_PER_THREAD + curr_tx;
+		if (size_of_CPU_input_buffer * 2 * NB_OF_BUFFERS < index) {
+			curr_tx = 0;
+			index = buffers_start+id*NB_CPU_TXS_PER_THREAD + curr_tx;
+		}
+		
 		req->accounts_vec[0] = CPUInputBuffer[index];
 
 		// if (accounts_vec[0] == 0) {
@@ -723,7 +747,8 @@ static void* test_enqueuer(void *data)
 		}
 		sharedConcQueue.push(req);
 		curr_tx += 1;
-		id = (id + 1) % d->nb_threadsCPU;
+		if (d->nb_threadsCPU == 0) id = id;
+		else id = (id + 1) % d->nb_threadsCPU;
 	}
 	return NULL;
 }
@@ -746,8 +771,15 @@ static void test(int id, void *data)
 	int bad_buffers_start = size_of_CPU_input_buffer/sizeof(int) * NB_OF_BUFFERS;
 	int buffers_start = isInterBatch ? bad_buffers_start : good_buffers_start;
 
-	int index = buffers_start+id*NB_CPU_TXS_PER_THREAD + curr_tx;
-	accounts_vec[0] = CPUInputBuffer[index];
+	// for (int i = 0; i < (d->trfs * 20); ++i) {
+	// 	int index = buffers_start+id*NB_CPU_TXS_PER_THREAD + curr_tx;
+	// #if BANK_PART == 6
+	// 	accounts_vec[i] = CPU_ACCESS(id+i+curr_tx, parsedData.nb_accounts-20); //CPUInputBuffer[index];
+	// #else
+	// 	accounts_vec[i] = CPUInputBuffer[index];
+	// #endif
+	// 	curr_tx = (curr_tx + 1) % NB_CPU_TXS_PER_THREAD;
+	// }
 
 	while (!sharedConcQueue.try_pop(req)) /* wait */; // TODO: the other thread spams mallocs....
 
@@ -916,6 +948,7 @@ static void afterGPU(int id, void *data)
   // leave this one
   printf("CUDA thread terminated after %li(%li successful) run(s). \nTotal cuda execution time: %f ms.\n",
     HeTM_stats_data.nbBatches, HeTM_stats_data.nbBatchesSuccess, HeTM_stats_data.timeGPU);
+	HeTM_flush_barrier();
 }
 
 /* ################################################################### *
@@ -1118,6 +1151,7 @@ int main(int argc, char **argv)
   /* Cleanup STM */
   TM_EXIT();
   /*Cleanup GPU*/
+	HeTM_flush_barrier();
   jobWithCuda_exit(cuda_st);
   free(cuda_st);
   // ### End iterations ########################################################

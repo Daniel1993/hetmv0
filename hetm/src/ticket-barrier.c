@@ -25,7 +25,7 @@
 #define atomic_or(P, V) __sync_or_and_fetch((P), (V))
 
 /* Force a read of the variable */
-#define atomic_read(V) (*(volatile typeof(V) *)&(V))
+#define atomic_read(V) __atomic_load_n(&(V), __ATOMIC_ACQUIRE)
 
 static inline long sys_futex(void *addr1, int op, int val1, struct timespec *timeout, void *addr2, int val3)
 {
@@ -46,6 +46,7 @@ void ticket_barrier_init(ticket_barrier_t *b, unsigned count)
 void ticket_barrier_destroy(ticket_barrier_t *b)
 {
 	/* Alter the refcount so we trigger futex wake */
+	ticket_barrier_reset(b);
 	atomic_add(&b->count_in, -1);
 
 	/* However, threads can be leaving... so wait for them */
@@ -58,6 +59,7 @@ void ticket_barrier_destroy(ticket_barrier_t *b)
 		if (count_out == atomic_read(b->count_in) + 1) return;
 
 		// sys_futex(&b->count_out, FUTEX_WAIT_PRIVATE, count_out, NULL, NULL, 0);
+		atomic_add(&b->count_in, -1);
 	}
 }
 
@@ -114,4 +116,12 @@ int ticket_barrier_cross(ticket_barrier_t *b)
 	}
 
 	return ret;
+}
+
+int ticket_barrier_reset(ticket_barrier_t *b)
+{
+	atomic_add(&b->count_in, b->total);
+	atomic_add(&b->reset, 1ULL << 32);
+	b->count_next += b->total;
+	__sync_synchronize();
 }

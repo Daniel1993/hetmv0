@@ -163,6 +163,7 @@ void bank_parseArgs(int argc, char **argv, thread_data_t *data)
         break;
       case 'n':
         data->nb_threads = atoi(optarg);
+        data->nb_threadsCPU = atoi(optarg);
         break;
       case 's':
         data->hmult = atof(optarg);

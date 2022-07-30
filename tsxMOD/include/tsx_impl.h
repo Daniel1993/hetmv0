@@ -79,7 +79,7 @@ extern int errors[MAX_THREADS][HTM_NB_ERRORS];
   errors[tid][HTM_FALLBACK]++;
 
 // not defined in the template
-#define HTM_SGL_init_thr() ({ HTM_thr_init(); HeTM_log = stm_log_init(); HeTM_htmRndSeed *= HTM_SGL_tid + 1234; })
+#define HTM_SGL_init_thr() ({ HTM_thr_init(-1); HeTM_log = stm_log_init(); HeTM_htmRndSeed *= HTM_SGL_tid + 1234; })
 #define HTM_SGL_exit_thr() ({ HTM_thr_exit(); if (HeTM_log != NULL) { stm_log_free(HeTM_log); HeTM_log = NULL; } })
 
 #define HeTM_get_log(ptr) ({ *(HeTM_CPULogNode_t **)ptr = stm_log_read(HeTM_log); })

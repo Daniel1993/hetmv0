@@ -3,6 +3,7 @@
 #include "hetm-timer.h"
 #include "hetm-cmp-kernels.cuh"
 #include "knlman.h"
+#include "arch.h"
 
 #include <list>
 #include <mutex>
@@ -79,7 +80,7 @@ static TIMER_T bmapBlockedStart, bmapBlockedEnd;
 static int launchCmpKernel(void*);
 #endif /* HETM_LOG_TYPE != HETM_BMAP_LOG */
 
-#define WAIT_ON_FLAG(flag) while(!(flag)) pthread_yield(); flag = 0
+#define WAIT_ON_FLAG(flag) while(!(flag)) PAUSE(); __atomic_store_n(&flag, 0, __ATOMIC_RELAXED);
 
 #ifdef HETM_OVERLAP_CPY_BACK
 static int isOverlappingKernel = 0;
@@ -164,7 +165,7 @@ loop_gpu_batch:
       // TODO: GPU kernels are NOT overlaping with the copy
       // WAIT_ON_FLAG(isDatasetSyncDone);
 
-      while (!isDatasetSyncDone) {
+      while (!__atomic_load_n(&isDatasetSyncDone, __ATOMIC_ACQUIRE)) {
         // wait previous kernel and launch another one
         waitBatchEnd();
         runAfterKernel(threadId, (void*)HeTM_thread_data);
@@ -190,7 +191,8 @@ loop_gpu_batch:
     waitBatchEnd();
     runAfterKernel(threadId, (void*)HeTM_thread_data);
     TIMER_READ(t2);
-    if(TIMER_DIFF_SECONDS(t1woCpy, t2) < HeTM_shared_data.timeBudget) {
+    double copyDuration = TIMER_DIFF_SECONDS(t1woCpy, t2);
+    if(copyDuration < HeTM_shared_data.timeBudget) {
       do {
         // TODO: this runs before EACH batch in a round
         // but the afterBatch method only runs once
@@ -199,7 +201,8 @@ loop_gpu_batch:
         waitBatchEnd();
         runAfterKernel(threadId, (void*)HeTM_thread_data);
         TIMER_READ(t2);
-      } while(TIMER_DIFF_SECONDS(t1woCpy, t2) < HeTM_shared_data.timeBudget && !isInterConflt);
+      } while ((copyDuration = TIMER_DIFF_SECONDS(t1woCpy, t2)) < HeTM_shared_data.timeBudget 
+        && !__atomic_load_n(&isInterConflt, __ATOMIC_ACQUIRE));
     }
     if (isInterConflt) HeTM_stats_data.nbEarlyValAborts++;
     afterWaitBatchEnd();
@@ -212,14 +215,17 @@ loop_gpu_batch:
 
     waitCMPEnd();
     isInterConflt = HeTM_is_interconflict();
-    if (isInterConflt) {
-      HeTM_stats_data.timeAbortedBatches += timeLastBatch;
-    }
     TIMER_READ(t1);
     HeTM_stats_data.timeCMP += TIMER_DIFF_SECONDS(t2, t1);
 
 // ---------------------
     mergeDataset();
+#if HETM_LOG_TYPE == HETM_BMAP_LOG
+    isInterConflt = HeTM_is_interconflict();
+#endif
+    if (isInterConflt) {
+      HeTM_stats_data.timeAbortedBatches += timeLastBatch;
+    }
 // ---------------------
     checkIsExit();
 // ---------------------
@@ -320,9 +326,6 @@ loop_gpu_batch:
 
     waitCMPEnd();
     isInterConflt = HeTM_is_interconflict();
-    if (isInterConflt) {
-      HeTM_stats_data.timeAbortedBatches += timeLastBatch;
-    }
     TIMER_READ(t3);
      // TODO: let the next batch begin if dataset is still not copied
 
@@ -330,6 +333,12 @@ loop_gpu_batch:
 
 // ---------------------
     mergeDataset();
+#if HETM_LOG_TYPE == HETM_BMAP_LOG
+    isInterConflt = HeTM_is_interconflict();
+#endif
+    if (isInterConflt) {
+      HeTM_stats_data.timeAbortedBatches += timeLastBatch;
+    }
 // ---------------------
     checkIsExit();
 
@@ -459,7 +468,7 @@ static inline void runAfterKernel(int id, void *data)
     clbk(id, data);
   }
 
-  isInterConflt = HeTM_is_interconflict();
+  __atomic_store_n(&isInterConflt, HeTM_is_interconflict(), __ATOMIC_RELEASE);
 
   PR_useNextStream(&HeTM_pr_args); // swaps the current stream
 }
@@ -528,6 +537,9 @@ static inline void waitCMPEnd()
 
 #if HETM_LOG_TYPE == HETM_BMAP_LOG
   TIMER_READ(bmapBlockedStart);
+#else
+  HeTM_sync_barrier(); // Blocks and waits comparison kernel to end
+  HeTM_set_is_interconflict(HeTM_get_inter_confl_flag(HeTM_memStream2, 1));
 #endif /* HETM_LOG_TYPE == HETM_BMAP_LOG */
 
   // TODO: CPU_INV not working
@@ -544,9 +556,6 @@ static inline void waitCMPEnd()
 //       ptrMempool, sizeofMempool, backupTheMempool_fn);
 //   }
 // #endif /* HETM_LOG_TYPE == HETM_VERS_LOG */
-
-  HeTM_sync_barrier(); // Blocks and waits comparison kernel to end
-  HeTM_set_is_interconflict(HeTM_get_inter_confl_flag(HeTM_memStream2, 1));
 }
 
 static inline void mergeDataset()
@@ -825,10 +834,10 @@ static void offloadAfterCmp(void *args)
     launchCmpKernel(args); // if BMAP blocks and run the kernel
   }
 #else /* HETM_LOG_TYPE != HETM_BMAP_LOG */
-
-HeTM_set_is_interconflict(HeTM_get_inter_confl_flag(HeTM_memStream2, 1));
-
+  int isConfl = HeTM_get_inter_confl_flag(HeTM_memStream2, 1);
+  HeTM_set_is_interconflict(isConfl);
 #endif /* HETM_LOG_TYPE == HETM_BMAP_LOG */
+
   // gets the flag
   isAfterCmpDone = 1;
   __sync_synchronize();
@@ -843,6 +852,10 @@ static void updateStatisticsAfterBatch(void *arg)
 
   if (arg == NULL) { // TODO: stupid hack to avoid transfer the commits
     HeTM_stats_data.nbBatches++;
+#if HETM_LOG_TYPE == HETM_BMAP_LOG
+    while (!__atomic_load_n(&isAfterCmpDone, __ATOMIC_ACQUIRE));
+    isInterConflt = HeTM_is_interconflict();
+#endif
     if (isInterConflt) {
       HeTM_stats_data.nbBatchesFail++;
     } else {
@@ -936,7 +949,8 @@ static int launchCmpKernel(void *args)
   TIMER_READ(start_confl);
 
   unsigned char *cachedValues;
-  memman_select("HeTM_cpu_wset_cache_confl"); // not zeroed now
+  // memman_select("HeTM_cpu_wset_cache_confl"); // not zeroed now
+
   memman_select("HeTM_cpu_wset_cache");
   cachedValues = (unsigned char*)memman_get_cpu(&sizeCache);
   // --------------------------
@@ -1017,8 +1031,8 @@ static int launchCmpKernel(void *args)
   // threadData->timeCmpSum += threadData->timeCmp;
   // CHECK FOR CONFLICTS ////////////////////////////////////
 
-  cudaStreamSynchronize((cudaStream_t)threadData->stream);
-  HeTM_set_is_interconflict(HeTM_get_inter_confl_flag(threadData->stream, 1));
+  CUDA_CHECK_ERROR(cudaStreamSynchronize((cudaStream_t)threadData->stream), "BMAP kernel failed");
+  int isInterConflict = HeTM_get_inter_confl_flag(threadData->stream, 1/* force copy */);
 
   memman_select("HeTM_cpu_wset_cache_confl2");
   unsigned char *conflInGPUw = (unsigned char*)memman_get_cpu(NULL);
@@ -1132,7 +1146,7 @@ static int launchCmpKernel(void *args)
   TIMER_READ(start_confl);
 
 #if HETM_CMP_TYPE == HETM_CMP_COMPRESSED
-  if (HeTM_is_interconflict()) {
+  if (isInterConflict) {
     cudaStream_t currentStream = (cudaStream_t)threadData->stream;
     cudaStream_t nextStream = (cudaStream_t)HeTM_memStream;
     cudaStream_t tmp;
@@ -1181,7 +1195,7 @@ static int launchCmpKernel(void *args)
       blocksBitmapGran_coalesced = sizeToCpy / threadsPerBlockBitmapGran;
       if (sizeToCpy % threadsPerBlockBitmapGran > 0)  blocksBitmapGran_coalesced++;
 
-      cudaStreamSynchronize(currentStream);
+      // cudaStreamSynchronize(currentStream);
       HeTM_knl_checkTxBitmap<<<blocksBitmapGran_coalesced, threadsPerBlockBitmapGran, 0, currentStream>>>(
         (HeTM_knl_cmp_args_s){
           .sizeWSet = (int)HeTM_shared_data.wsetLogSize,
@@ -1195,9 +1209,6 @@ static int launchCmpKernel(void *args)
       nextStream = tmp;
       break;
     }
-
-    cudaDeviceSynchronize();
-    HeTM_set_is_interconflict(HeTM_get_inter_confl_flag(currentStream, 1));
     // -------------------------------------------------------------------------
   }
 #else
@@ -1222,9 +1233,10 @@ static int launchCmpKernel(void *args)
 
   TIMER_READ(start_wset);
 
-  HeTM_set_is_interconflict(HeTM_get_inter_confl_flag(threadData->stream, 1));
+  cudaDeviceSynchronize(); // waits transfer to stop
+  isInterConflict = HeTM_get_inter_confl_flag(threadData->stream, 1/* force copy */);
+  HeTM_set_is_interconflict(isInterConflict);
   if (!HeTM_is_interconflict()) {
-    cudaDeviceSynchronize(); // waits transfer to stop
     // wait check kernel to end
 
 #if HETM_CMP_TYPE == HETM_CMP_COMPRESSED
@@ -1294,6 +1306,7 @@ static int launchCmpKernel(void *args)
 
     NVTX_POP_RANGE();
   } else {
+
     // stops sending WSet GPU because
     // memman_stop_async_transfer();
     // TODO: instead of stop --> send the whole data-set (to replace with GPU dataset)
@@ -1348,27 +1361,26 @@ static int launchCmpKernel(void *args)
   threadData->timeCpySum += TIMER_DIFF_SECONDS(start_wset, end_wset) * 1000.0f;
 
 #ifndef HETM_OVERLAP_CPY_BACK
-  // TODO: zero cache set cache to 1
-  // TODO: --> do a +1 on the bitmap and avoid memset to 0 (only once every 255 batches)
-  // if (HeTM_is_interconflict()) { // TODO: causes false conflicts
+  // HeTM_shared_data.batchCount is incremented on other place (only once every 255 batches)
   if ((HeTM_shared_data.batchCount & 0xff) == 0xff) { // at some round --> reset
     memman_select("HeTM_cpu_wset");
     memman_zero_cpu(NULL); // this is slow!
     memman_select("HeTM_cpu_wset_cache");
-    memman_zero_cpu(NULL); // this is slow!
+    memman_zero_cpu(NULL);
     memman_select("HeTM_cpu_wset_cache_confl");
-    memman_zero_cpu(NULL); // this is slow!
+    memman_zero_cpu(NULL);
   }
   // memman_select("HeTM_cpu_wset_cache_confl");
   // memman_zero_gpu(NULL); // this is slow!
   memman_select("HeTM_cpu_wset_cache_confl2");
-  // memman_zero_cpu(NULL); // this is slow!
   memman_zero_gpu(NULL); // this is slow!
-#endif
+#endif /* HETM_OVERLAP_CPY_BACK */
   // HeTM_set_is_interconflict(HeTM_get_inter_confl_flag(HeTM_memStream2, 1));
   // -----------------------------------------------
   // TIMER_READ(t2);
   // HeTM_stats_data.timeCMP += TIMER_DIFF_SECONDS(t1, t2); // must remove this time from the dataset
+  TIMER_READ(end_wset);
+  // printf("Final code took %f ms\n", TIMER_DIFF_SECONDS(start_wset, end_wset) * 1000.0f);
   return 0;
 }
 #endif /* if HETM_LOG_TYPE == HETM_BMAP_LOG */
