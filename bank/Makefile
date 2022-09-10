@@ -195,7 +195,7 @@ $(APP): $(OBJS)
 		DISABLE_WS=$(DISABLE_WS)
 	@echo "Linking..."
 	### TODO: optimization breaks performance
-	$(CXX) $(CXXFLAGS) -O0 -o $(SRC)/bankTXs.o $(SRC)/bankTXs.cpp
+	#$(CXX) $(CXXFLAGS) -O0 -o $(SRC)/bankTXs.o $(SRC)/bankTXs.cpp
 	$(NVCC) $(LDFLAGS) -o $@ $(OBJS)
 
 %.o:	%.c
@@ -223,4 +223,4 @@ ptx:
 clean:
 	$(MAKE) --directory $(HETM_ROOT) clean
 	$(MAKE) --directory $(HETM_ROOT) clean
-	rm -f $(APP) *.o $(SRC)/*.o
+	rm -f $(APP) *.o $(SRC)/*.o $(BANK_OBJS)

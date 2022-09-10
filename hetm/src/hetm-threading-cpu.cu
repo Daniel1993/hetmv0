@@ -392,6 +392,7 @@ static void cpyWSetToGPU()
 static void cmpBlockApply()
 {
   int i;
+  if (!HeTM_thread_data->wSetLog) HeTM_thread_data->wSetLog = stm_thread_local_log;
   size_t curNodeSize = HeTM_thread_data->wSetLog->size;
 
   HETM_DEB_THRD_CPU("Thread %i blocks and sends the Logs", HeTM_thread_data->id);

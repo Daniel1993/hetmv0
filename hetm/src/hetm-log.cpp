@@ -23,7 +23,7 @@ long *hetm_batchCount = 0;
 HETM_LOG_T* stm_log_init()
 {
   HETM_LOG_T *res = NULL;
-#if HETM_LOG_TYPE != HETM_BMAP_LOG /* ADDR or VERS */
+// #if HETM_LOG_TYPE != HETM_BMAP_LOG /* ADDR or VERS */
   if (stm_thread_local_log != NULL) return stm_thread_local_log; // already init
   res = (HETM_LOG_T*)malloc(sizeof(HETM_LOG_T));
 
@@ -40,7 +40,7 @@ HETM_LOG_T* stm_log_init()
     CHUNKED_LOG_FREE(chunks[i]);
   }
 
-#endif /* HETM_LOG_TYPE */
+// #endif /* HETM_LOG_TYPE */
   // printf("new log=%p\n", res);
   // COMPILER_FENCE(); // some error
   __sync_synchronize();

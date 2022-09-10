@@ -69,12 +69,12 @@ int transfer2(account_t *accounts, volatile unsigned *positions, int isInter, in
 	for (n = 0; n < forLoop; n++) {
 		randNum = RAND_R_FNC(seedCopy);
 		if (!isInter) {
-			// accountIdx = CPU_ACCESS(randNum, nbAccounts);
-			accountIdx = CPU_ACCESS_SMALLER(randNum, nbAccounts);
+			accountIdx = CPU_ACCESS(randNum, nbAccounts);
+			// accountIdx = CPU_ACCESS_SMALLER(randNum, nbAccounts);
 		} else {
 #if BANK_PART == 9
 			// deterministic abort
-			if (tid == 1 && n == 0)
+			if (tid == 0 && n == 0)
 				accountIdx = 0;
 			else
 				accountIdx = /*(n == 0) ? tid * 64 : */INTERSECT_ACCESS_CPU(randNum, nbAccounts);
@@ -82,7 +82,8 @@ int transfer2(account_t *accounts, volatile unsigned *positions, int isInter, in
 			accountIdx = INTERSECT_ACCESS_CPU(randNum, nbAccounts);
 #endif /* BANK_PART == 9 */
 		}
-		pos[n] = accounts + accountIdx;
+		// pos[n] = accounts + accountIdx;
+		// printf("_TM_LOAD %i\n", accountIdx);
 		int someLoad = TM_LOAD(accounts + accountIdx);
 		count_amount += someLoad;
 		// int someLoad = TM_LOAD(pos[n]);
@@ -100,12 +101,12 @@ int transfer2(account_t *accounts, volatile unsigned *positions, int isInter, in
 	for (n = 0; n < count; n++) {
 		randNum = RAND_R_FNC(seedCopy);
 		if (!isInter) {
-			// accountIdx = CPU_ACCESS(randNum, nbAccounts);
-			accountIdx = CPU_ACCESS_SMALLER(randNum, nbAccounts);
+			accountIdx = CPU_ACCESS(randNum, nbAccounts);
+			// accountIdx = CPU_ACCESS_SMALLER(randNum, nbAccounts);
 		} else {
 #if BANK_PART == 9
 			// deterministic abort
-			if (tid == 1 && n == 0)
+			if (tid == 0 && n == 0)
 				accountIdx = 0;
 			else
 				accountIdx = /*(n == 0) ? tid * 64 : */INTERSECT_ACCESS_CPU(randNum, nbAccounts);
@@ -113,6 +114,7 @@ int transfer2(account_t *accounts, volatile unsigned *positions, int isInter, in
 			accountIdx = INTERSECT_ACCESS_CPU(randNum, nbAccounts);
 #endif /* BANK_PART == 9 */
 		}
+		// printf("_TM_STORE %i\n", accountIdx);
 		TM_STORE(accounts + accountIdx, count_amount * input);
 		// TM_STORE(pos[n], count_amount * input);
 	}
@@ -149,8 +151,8 @@ int readOnly2(account_t *accounts, volatile unsigned *positions, int isInter, in
 	for (n = 0; n < count; n++) {
 		randNum = RAND_R_FNC(someSeed);
 		if (!isInter) {
-			// accountIdx = CPU_ACCESS(randNum, nbAccounts);
-			accountIdx = CPU_ACCESS_SMALLER(randNum, nbAccounts);
+			accountIdx = CPU_ACCESS(randNum, nbAccounts);
+			// accountIdx = CPU_ACCESS_SMALLER(randNum, nbAccounts);
 		} else {
 #if BANK_PART == 9
 			// deterministic abort

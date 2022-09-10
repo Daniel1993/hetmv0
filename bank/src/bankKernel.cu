@@ -41,7 +41,7 @@ __constant__ __device__ int   read_intensive_size;
 
 __constant__ __device__ thread_data_t devParsedData;
 
-__constant__ __device__ int PR_maxNbRetries = 16;
+// __constant__ __device__ int PR_maxNbRetries = 16;
 
 /****************************************************************************
  *	KERNELS
@@ -168,9 +168,9 @@ __device__ void readIntensive_tx(PR_txCallDefArgs, int txCount)
 	output_buffer[id] = 1;
 
 #ifndef BANK_DISABLE_PRSTM
-	int nbRetries = 0;
+	// int nbRetries = 0;
 	PR_txBegin();
-	if (nbRetries++ > PR_maxNbRetries) break;
+	// if (nbRetries++ > PR_maxNbRetries) break;
 #endif /* BANK_DISABLE_PRSTM */
 
 	// reads the accounts first, then mutates the locations
@@ -248,9 +248,9 @@ __device__ void readOnly_tx(PR_txCallDefArgs, int txCount)
 	output_buffer[id] = 1;
 
 #ifndef BANK_DISABLE_PRSTM
-	int nbRetries = 0;
+	// int nbRetries = 0;
 	PR_txBegin();
-	if (nbRetries++ > PR_maxNbRetries) break;
+	// if (nbRetries++ > PR_maxNbRetries) break;
 #endif /* BANK_DISABLE_PRSTM */
 
 	// reads the accounts first, then mutates the locations
@@ -316,9 +316,9 @@ __device__ void update_tx2(PR_txCallDefArgs, int txCount)
 	// 	state[id] += id + 1234 * i;
 	// }
 
-	volatile int nbRetries = 0;
+	// volatile int nbRetries = 0;
 	PR_txBegin();
-	if (nbRetries++ > PR_maxNbRetries) break;
+	// if (nbRetries++ > PR_maxNbRetries) break;
 
 	seedState = state[id];
 	int loopFor = read_intensive_size;
@@ -331,8 +331,8 @@ __device__ void update_tx2(PR_txCallDefArgs, int txCount)
 	for (i = 0; i < loopFor; i++) {
 		randNum = PR_rand(INT_MAX);
 		if (!isInter) {
-			// accountIdx = GPU_ACCESS(randNum, nbAccounts);
-			accountIdx = GPU_ACCESS_SMALLER(randNum, nbAccounts);
+			accountIdx = GPU_ACCESS(randNum, nbAccounts);
+			// accountIdx = GPU_ACCESS_SMALLER(randNum, nbAccounts);
 		} else {
 #if BANK_PART == 9
 			// deterministic abort
@@ -354,8 +354,8 @@ __device__ void update_tx2(PR_txCallDefArgs, int txCount)
 	for (i = 0; i < read_intensive_size; i++) {
 		randNum = PR_rand(INT_MAX); // 56; //
 		if (!isInter) {
-			// accountIdx = GPU_ACCESS(randNum, nbAccounts);
-			accountIdx = GPU_ACCESS_SMALLER(randNum, nbAccounts);
+			accountIdx = GPU_ACCESS(randNum, nbAccounts);
+			// accountIdx = GPU_ACCESS_SMALLER(randNum, nbAccounts);
 		} else {
 #if BANK_PART == 9
 			// deterministic abort
@@ -407,14 +407,14 @@ __device__ void readOnly_tx2(PR_txCallDefArgs, int txCount)
 	loopFor *= HETM_BANK_PART_SCALE;
 #endif
 	PR_txBegin();
-	if (nbRetries++ > PR_maxNbRetries) break;
+	// if (nbRetries++ > PR_maxNbRetries) break;
 
 	#pragma unroll
 	for (i = 0; i < loopFor; i++) {
 		randNum = PR_rand(INT_MAX);
 		if (!isInter) {
-			// accountIdx = GPU_ACCESS(randNum, nbAccounts);
-			accountIdx = GPU_ACCESS_SMALLER(randNum, nbAccounts);
+			accountIdx = GPU_ACCESS(randNum, nbAccounts);
+			// accountIdx = GPU_ACCESS_SMALLER(randNum, nbAccounts);
 		} else {
 #if BANK_PART == 9
 			// deterministic abort
@@ -431,7 +431,7 @@ __device__ void readOnly_tx2(PR_txCallDefArgs, int txCount)
 	}
 	PR_txCommit();
 
-	output_buffer[id] = *(accounts + accountIdx);
+	output_buffer[id] = count_amount;
 }
 
 __device__ void update_tx(PR_txCallDefArgs, int txCount)
@@ -480,9 +480,9 @@ __device__ void update_tx(PR_txCallDefArgs, int txCount)
 	output_buffer[id] = 0;
 
 #ifndef BANK_DISABLE_PRSTM
-	int nbRetries = 0;
+	// int nbRetries = 0;
 	PR_txBegin();
-	if (nbRetries++ > PR_maxNbRetries) break;
+	// if (nbRetries++ > PR_maxNbRetries) break;
 #endif
 
 	// TODO: store must be controlled with parsedData.access_controller
@@ -596,9 +596,9 @@ __device__ void updateReadOnly_tx(PR_txCallDefArgs, int txCount)
 	output_buffer[id] = 0;
 
 #ifndef BANK_DISABLE_PRSTM
-	int nbRetries = 0;
+	// int nbRetries = 0;
 	PR_txBegin();
-	if (nbRetries++ > PR_maxNbRetries) break;
+	// if (nbRetries++ > PR_maxNbRetries) break;
 #endif
 
 	// reads the accounts first, then mutates the locations
